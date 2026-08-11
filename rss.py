@@ -20,9 +20,6 @@ def parse_planetpy_rss():
                     #EX:{'title': 'Some Blog Post Title', 'link': 'https://example.com/post'}
             items.append(item)
     return items[:10]# return the first 10 items from the list of dictionaries'''
-import requests
-response = requests.get("http://planetpython.org/rss20.xml")
-print(response.status_code)
-print(response.text[:500])
+
 
    
