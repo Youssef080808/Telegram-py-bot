@@ -1,7 +1,7 @@
 """from telegram import Bot, Update # to use Bot tool from telegram librar(to interact with 
 #Telegram API)
 import asyncio # tasks involving waiting for events to happen, such as waiting for a response from a server or waiting for a user to input data.
-BOT_TOKEN = '8802116490:AAHaMBAgKDcytd9Cpnt2aQEO-kXrO7m7rZg'
+BOT_TOKEN = 'TOKEN'
 async def main():# function that waits on something
     bot = Bot(token=BOT_TOKEN)# connects to the Telegram API using the provided bot token
     #me = await bot.get_me()# asks telegram API for information about the bot itself
@@ -16,7 +16,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import requests
 import xml.etree.ElementTree as cElementTree
 
-BOT_TOKEN = "8802116490:AAHaMBAgKDcytd9Cpnt2aQEO-kXrO7m7rZg"
+BOT_TOKEN = "PASTE_TOKEN_HERE" 
 
 # Parses first 10 items from http://planetpython.org/rss20.xml and returns a list of 
 # dictionaries with the title, link, and description of each item.
