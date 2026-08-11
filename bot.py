@@ -17,14 +17,21 @@ import requests
 import xml.etree.ElementTree as cElementTree
 import random
 
-BOT_TOKEN = "PASTE_YOUR_BOT_TOKEN_HERE" 
+BOT_TOKEN = "PASTE_YOUR_BOT_TOKEN_HERE"
 
 # Parses first 10 items from http://planetpython.org/rss20.xml and returns a list of 
 # dictionaries with the title, link, and description of each item.
 def parse_planetpy_rss(number : int):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    response = requests.get("https://planetpython.org/rss20.xml", headers=headers) # GET request to download the 
-    # RSS feed from the specified URL
+    try:
+        response = requests.get("https://planetpython.org/rss20.xml", headers=headers) # GET request to download the 
+        # RSS feed from the specified URL
+    except requests.exceptions.RequestException:
+        print("Couldn't reach Planet Python")
+        return []
+    except cElementTree.ParseError:
+        print("Couldn't parse it as XML")
+        return []
     parsed_xml = cElementTree.fromstring(response.content)# response.content contains the raw 
     #XML data from the RSS feed and fromstring() parses the XML data into an ElementTree object
     items = []
@@ -63,6 +70,9 @@ async def feed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         number = 10
     posts = parse_planetpy_rss(number) # list of 10 dictionaries
+    if not posts:
+        await update.message.reply_text("Couldn't reach latest Planet Python blog posts. Please try again later.")
+        return
     message = "\n\n".join([f"{p['title']}\n{p['link']}" for p in posts]) # COMPACT LOOP to 
     # create a string with the titles and links of the latest blog posts
     await update.message.reply_text(message) # sends combined message back to the user 
@@ -74,13 +84,31 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     "/feed x: gets the x latest blog posts from Planet Python or 10 if no number provided\n"
     "/help: shows available commands\n"
     "/random: gets a random blog post from Planet Python"
+    "/search keywords: searches for blog posts with the provided keywords in the title"
     )
 async def random_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     latest_blogs = parse_planetpy_rss(10) # list of 10 dictionaries
+    if not latest_blogs:
+        await update.message.reply_text("Couldn't reach latest Planet Python blog posts. Please try again later.")
+        return
     random_blog = random.choice(latest_blogs) # selects a random blog post from the list
     message = f"{random_blog['title']}\n{random_blog['link']}"
     await update.message.reply_text(message) # sends the random blog post back to the user
-
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Please provide the keywords to be searched for in the blog post title")
+        return
+    keywords = " ".join(context.args)
+    posts = parse_planetpy_rss(12)
+    matched_posts = []
+    for p in posts:
+        if keywords.lower() in p['title'].lower():
+            matched_posts.append(p)
+    if not matched_posts:
+        await update.message.reply_text("Couldn't find any blog post with these keywords")
+        return
+    message = "\n\n".join([f"{p['title']}\n{p['link']}" for p in matched_posts])
+    await update.message.reply_text(message)
 
 
 if __name__ == "__main__": # if this script is being run directly, then execute the code
@@ -89,5 +117,6 @@ if __name__ == "__main__": # if this script is being run directly, then execute 
     app.add_handler(CommandHandler("feed", feed_command)) # calls feed_command() when user sends /feed command
     app.add_handler(CommandHandler("help", help_command)) # calls help_command() when user sends /help command
     app.add_handler(CommandHandler("random", random_command)) # calls random_command() when user sends /random command
+    app.add_handler(CommandHandler("search", search_command)) # calls serach_command when user sends /search command
     print("Bot is running...")
     app.run_polling() # starts the bot and keeps it running
