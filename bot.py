@@ -85,6 +85,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     "/help: shows available commands\n"
     "/random: gets a random blog post from Planet Python"
     "/search keywords: searches for blog posts with the provided keywords in the title"
+    "/count: counts the number of available blog posts\n"
+    "/author name: searches for blog posts by the provided author name"
     )
 async def random_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     latest_blogs = parse_planetpy_rss(10) # list of 10 dictionaries
@@ -99,13 +101,35 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Please provide the keywords to be searched for in the blog post title")
         return
     keywords = " ".join(context.args)
-    posts = parse_planetpy_rss(12)
+    posts = parse_planetpy_rss(50)
     matched_posts = []
     for p in posts:
         if keywords.lower() in p['title'].lower():
             matched_posts.append(p)
     if not matched_posts:
         await update.message.reply_text("Couldn't find any blog post with these keywords")
+        return
+    message = "\n\n".join([f"{p['title']}\n{p['link']}" for p in matched_posts])
+    await update.message.reply_text(message)
+async def count_command(update:Update, context: ContextTypes.DEFAULT_TYPE):
+    posts = parse_planetpy_rss(50)
+    count = len(posts)
+    await update.message.reply_text(f"Number of available posts is {count}")
+async def author_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Please provide an author name")
+        return
+    author = " ".join(context.args)
+    if not author.replace(" ","").isalpha():
+        await update.message.reply_text("Please provide a valid author name")
+        return
+    posts = parse_planetpy_rss(50)
+    matched_posts = []
+    for p in posts:
+        if p['title'].lower().startswith(author.lower()):
+            matched_posts.append(p)
+    if not matched_posts:
+        await update.message.reply_text("Couldn't find any blog post by this author")
         return
     message = "\n\n".join([f"{p['title']}\n{p['link']}" for p in matched_posts])
     await update.message.reply_text(message)
@@ -117,6 +141,8 @@ if __name__ == "__main__": # if this script is being run directly, then execute 
     app.add_handler(CommandHandler("feed", feed_command)) # calls feed_command() when user sends /feed command
     app.add_handler(CommandHandler("help", help_command)) # calls help_command() when user sends /help command
     app.add_handler(CommandHandler("random", random_command)) # calls random_command() when user sends /random command
-    app.add_handler(CommandHandler("search", search_command)) # calls serach_command when user sends /search command
+    app.add_handler(CommandHandler("search", search_command)) # calls search_command when user sends /search command
+    app.add_handler(CommandHandler("count", count_command)) # calls count_command when user sends /count command 
+    app.add_handler(CommandHandler("author", author_command)) # calls author_command when user sends /author command
     print("Bot is running...")
     app.run_polling() # starts the bot and keeps it running
