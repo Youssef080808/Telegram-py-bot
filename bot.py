@@ -16,6 +16,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import requests
 import xml.etree.ElementTree as cElementTree
 import random
+import json
+import datetime as dt
 
 BOT_TOKEN = "PASTE_YOUR_BOT_TOKEN_HERE"
 
@@ -46,6 +48,8 @@ def parse_planetpy_rss(number : int):
                     #EX:{'title': 'Some Blog Post Title', 'link': 'https://example.com/post'}
             items.append(item)
     return items[:number]# return the first 10 items from the list of dictionaries
+
+# ANY FUNCTION THAT TALKS TO THE TELEGRAM SERVERS USES ASYNC AND AWAIT
 
 # runs when someone send /start command to the bot, update is info about incoming message and
 # context is extra tools and info, "starts the bot and sends a welcome message to the user"
@@ -87,6 +91,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     "/search keywords: searches for blog posts with the provided keywords in the title"
     "/count: counts the number of available blog posts\n"
     "/author name: searches for blog posts by the provided author name"
+    "/subscribe x: subscribes to the bot and gets x latest blog posts per digest or 10 if no number provided\n"
+    "/unsubscribe: unsubscribes from the bot"
     )
 async def random_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     latest_blogs = parse_planetpy_rss(10) # list of 10 dictionaries
@@ -134,6 +140,56 @@ async def author_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = "\n\n".join([f"{p['title']}\n{p['link']}" for p in matched_posts])
     await update.message.reply_text(message)
 
+def get_chat_ids():
+    try:
+        with open("subscribers.json", "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    
+def save_subs(subs : dict):
+    with open("subscribers.json", "w") as f:
+        json.dump(subs,f)
+
+async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        number = 10
+    else:
+        if context.args[0].isdigit():
+            if int(context.args[0]) <= 10 and int(context.args[0]) >=0:
+                number = int(context.args[0])
+            else:
+                await update.message.reply_text("Please provide a number 0-10")
+                return
+        else:
+            await update.message.reply_text("Please provide a number 0-10")
+            return
+    chat_id = update.effective_chat.id
+    chat_ids = get_chat_ids()
+    chat_ids[chat_id] = number
+    save_subs(chat_ids)
+    await update.message.reply_text(f"You're subscribed! You'll get {number} posts per digest.")
+
+async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_ids = get_chat_ids()
+    chat_id = update.effective_chat.id
+    chat_ids.pop(chat_id, None)
+    save_subs(chat_ids)
+    await update.message.reply_text("Unsubscribed succesfully")
+
+async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
+    chat_ids = get_chat_ids()
+    for chat_id in chat_ids:
+        number = chat_ids[chat_id]
+        posts = parse_planetpy_rss(number)
+        if not posts:
+            await context.bot.send_message(chat_id=chat_id, text="Couldn't reach latest Planet Python blog posts. Please try again later.")
+        else:
+            message = "\n\n".join([f"{p['title']}\n{p['link']}" for p in posts])
+            await context.bot.send_message(chat_id=chat_id, text=message)
+
+
+
 
 if __name__ == "__main__": # if this script is being run directly, then execute the code
     app = ApplicationBuilder().token(BOT_TOKEN).build() #creates a bot application
@@ -144,5 +200,8 @@ if __name__ == "__main__": # if this script is being run directly, then execute 
     app.add_handler(CommandHandler("search", search_command)) # calls search_command when user sends /search command
     app.add_handler(CommandHandler("count", count_command)) # calls count_command when user sends /count command 
     app.add_handler(CommandHandler("author", author_command)) # calls author_command when user sends /author command
+    app.add_handler(CommandHandler("subscribe", subscribe_command)) # calls subscribe_command when user sends /subscribe command
+    app.add_handler(CommandHandler("unsubscribe", unsubscribe_command)) # calls unsubscribe_command when user sends
+    app.job_queue.run_daily(send_daily_digest, time=dt.time(hour=16,minute=0)) # schedules send_daily_digest() to run every day at 16:00 UTC
     print("Bot is running...")
     app.run_polling() # starts the bot and keeps it running
