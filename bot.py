@@ -90,7 +90,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     "/random: gets a random blog post from Planet Python"
     "/search keywords: searches for blog posts with the provided keywords in the title"
     "/count: counts the number of available blog posts\n"
-    "/author name: searches for blog posts by the provided author name"
+    "/author name: searches for blog posts by the provided author name\n"
     "/subscribe x: subscribes to the bot and gets x latest blog posts per digest or 10 if no number provided\n"
     "/unsubscribe: unsubscribes from the bot"
     )
@@ -164,7 +164,7 @@ async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("Please provide a number 0-10")
             return
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
     chat_ids = get_chat_ids()
     chat_ids[chat_id] = number
     save_subs(chat_ids)
@@ -172,7 +172,7 @@ async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_ids = get_chat_ids()
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
     chat_ids.pop(chat_id, None)
     save_subs(chat_ids)
     await update.message.reply_text("Unsubscribed succesfully")
