@@ -1,41 +1,3 @@
-"""from telegram import Bot, Update # to use Bot tool from telegram librar(to interact with 
-#Telegram API)
-import asyncio # tasks involving waiting for events to happen, such as waiting for a response from a server or waiting for a user to input data.
-BOT_TOKEN = 'TOKEN'
-async def main():# function that waits on something
-    bot = Bot(token=BOT_TOKEN)# connects to the Telegram API using the provided bot token
-    #me = await bot.get_me()# asks telegram API for information about the bot itself
-    #print(me)
-    updates = await bot.get_updates(858465595+1)# asks telegram API for any new messages or 
-    # updates that have been sent to the bot
-    print(updates)
-asyncio.run(main())"""
-"""
-headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    try:
-        response = requests.get("https://planetpython.org/rss20.xml", headers=headers) # GET request to download the 
-        # RSS feed from the specified URL
-    except requests.exceptions.RequestException:
-        print("Couldn't reach Planet Python")
-        return []
-    except cElementTree.ParseError:
-        print("Couldn't parse it as XML")
-        return []
-    parsed_xml = cElementTree.fromstring(response.content)# response.content contains the raw 
-    #XML data from the RSS feed and fromstring() parses the XML data into an ElementTree object
-    items = []
-    for node in parsed_xml.iter():# iter() walks through all the nodes in the XML tree
-        if node.tag == "item":# RSS feeds structure each blog post as an <item>
-            item = {}
-            for item_node in list(node): # look at tags inside <item> tag
-                if item_node.tag == "title": 
-                    item["title"] = item_node.text
-                if item_node.tag == "link":
-                    item["link"] = item_node.text
-                    #EX:{'title': 'Some Blog Post Title', 'link': 'https://example.com/post'}
-            items.append(item)
-    return items[:number]# return the first 10 items from the list of dictionaries"""
-
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import requests
@@ -258,7 +220,7 @@ if __name__ == "__main__": # if this script is being run directly, then execute 
     app.add_handler(CommandHandler("author", author_command)) # calls author_command when user sends /author command
     app.add_handler(CommandHandler("subscribe", subscribe_command)) # calls subscribe_command when user sends /subscribe command
     app.add_handler(CommandHandler("unsubscribe", unsubscribe_command)) # calls unsubscribe_command when user sends
-    app.job_queue.run_daily(send_daily_digest, time=dt.time(hour=12,minute=38)) # schedules send_daily_digest() to run every day at 16:00 UTC
+    app.job_queue.run_daily(send_daily_digest, time=dt.time(hour=16,minute=00)) # schedules send_daily_digest() to run every day at 16:00 UTC
     app.add_handler(CommandHandler("mysettings", mysettings_command)) # calls mysettings_command when user sends /mysettings command
     print("Bot is running...")
     app.run_polling() # starts the bot and keeps it running
