@@ -1,12 +1,12 @@
 # Telegram Planet Python Bot
 
-A Telegram bot that fetches and delivers Python blog posts from the [Planet Python](https://planetpython.org/) RSS feed, with search, author lookup, a daily digest subscription system, caching, and command logging.
+A Telegram bot that fetches and delivers Python blog posts from the [Planet Python](https://planetpython.org/) RSS feed, with search, author lookup, a fully customizable daily digest subscription system, caching, and command logging.
 
 ## Features
 
 - Fetches the latest posts from Planet Python's RSS feed
 - Search posts by keyword or author (title-based)
-- Subscribe to a daily digest, sent automatically at a set time
+- Subscribe to a daily digest, with a per-user post count and delivery time (UTC)
 - In-memory caching of the RSS feed (5 minutes) to avoid redundant requests
 - Command usage logging to a local file
 - Input validation and graceful error handling if the feed is unreachable
@@ -22,9 +22,10 @@ A Telegram bot that fetches and delivers Python blog posts from the [Planet Pyth
 | `/search <keyword>` | Finds posts with a keyword in the title |
 | `/author <name>` | Finds posts by a specific author |
 | `/count` | Shows how many posts are currently available |
-| `/subscribe [x]` | Subscribes you to a daily digest (defaults to 10 posts) |
+| `/subscribe [x]` | Subscribes you to a daily digest (defaults to 10 posts, 16:00 UTC) |
+| `/settime <hour> <minute>` | Changes your personal daily digest delivery time (UTC, 24-hour format) |
 | `/unsubscribe` | Unsubscribes you from the daily digest |
-| `/mysettings` | Shows your current subscription status and post count |
+| `/mysettings` | Shows your current subscription status, post count, and delivery time |
 
 ## Setup
 
@@ -55,21 +56,28 @@ A Telegram bot that fetches and delivers Python blog posts from the [Planet Pyth
    python3 bot.py
    ```
 
+## Project structure
+
+- `bot.py` — entry point; builds the app, registers command handlers, and starts polling
+- `planetpy.py` — RSS parsing/caching, all command logic, the logging decorator, and subscriber storage
+- `subscribers.json` — generated at runtime, stores each subscriber's chat ID, post count, and digest time
+- `bot.log` — generated at runtime, records every command used with chat ID and timestamp
+
 ## How it works
 
 - Posts are fetched from `https://planetpython.org/rss20.xml` and parsed with Python's built-in `xml.etree.ElementTree`.
 - Fetched posts are cached in memory for 5 minutes to reduce redundant network requests across commands.
-- Subscriber data (chat ID + preferred post count) is stored locally in `subscribers.json`.
-- The daily digest is sent automatically using `python-telegram-bot`'s job queue — no manual trigger needed once subscribed.
+- Subscriber data (chat ID, preferred post count, and preferred delivery hour/minute) is stored locally in `subscribers.json`.
+- A background job runs every 60 seconds, checking the current UTC time against each subscriber's chosen time and sending their digest the moment it matches — so every subscriber gets their digest at their own chosen time, not a single fixed time for everyone.
 - Every command is wrapped with a logging decorator that records the chat ID, command name, and timestamp to `bot.log`.
 
 ## Planned features
 
-- A Brawl Stars integration (map lookups, brawler info) as a separate command set
-- Simple deployment so the bot runs continuously, not just while the script is active locally
+- Deployment so the bot runs continuously on a server, not just while the script is active locally
 
 ## Notes
 
 - Requires Python 3.9+
 - Built with [`python-telegram-bot`](https://github.com/python-telegram-bot/python-telegram-bot) and [`requests`](https://pypi.org/project/requests/)
 - `subscribers.json` and `bot.log` are generated at runtime and excluded from version control
+- All digest times are in UTC; there is currently no per-user timezone conversion
