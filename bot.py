@@ -1,7 +1,9 @@
 from telegram.ext import ApplicationBuilder, CommandHandler
 import planetpy as p
+import os
 
-BOT_TOKEN = "PASTE_TOKEN_HERE" # replace with your bot token from BotFather
+
+BOT_TOKEN = os.environ.get("BOT_TOKEN") # replace with your bot token from BotFather
 
 if __name__ == "__main__": # if this script is being run directly, then execute the code
     app = ApplicationBuilder().token(BOT_TOKEN).build() #creates a bot application
