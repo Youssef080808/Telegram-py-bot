@@ -6,6 +6,9 @@ import datetime as dt
 import xml.etree.ElementTree as cElementTree
 import requests
 import time
+import os
+
+DATA_DIR = os.environ.get("DATA_DIR", ".")
 
 
 cache = {"data": None, "timestamp": 0} # cache dictionary to store the latest blog posts 
@@ -49,7 +52,7 @@ def parse_planetpy_rss(number : int):
 def log_command(func):
     async def wrapper(update, context):
         chat_id = update.effective_chat.id
-        with open("bot.log", "a") as f:
+        with open(os.path.join(DATA_DIR, "bot.log"), "a") as f:
             f.write(f"{chat_id} - {func.__name__} - {dt.datetime.now()}\n")
         return await func(update, context)
     return wrapper   
@@ -164,14 +167,14 @@ async def author_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # retrieves the list of subscribed chat IDs from the JSON file
 def get_chat_ids():
     try:
-        with open("subscribers.json", "r") as f:
+        with open(os.path.join(DATA_DIR, "subscribers.json"), "r") as f:
             return json.load(f)
     except FileNotFoundError:
         return {}  
     
 # saves the updated list of subscribed chat IDs to the JSON file
 def save_subs(subs : dict):
-    with open("subscribers.json", "w") as f:
+    with open(os.path.join(DATA_DIR, "subscribers.json"), "w") as f:
         json.dump(subs,f)
 
 # subscribes the user to the bot and saves their chat ID and the number of blog posts they
