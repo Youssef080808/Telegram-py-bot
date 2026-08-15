@@ -1,6 +1,6 @@
 # Telegram Planet Python Bot
 
-A Telegram bot that fetches and delivers Python blog posts from the [Planet Python](https://planetpython.org/) RSS feed, with search, author lookup, a fully customizable daily digest subscription system, caching, and command logging. Deployed and running live on Railway.
+A Telegram bot that fetches and delivers Python blog posts from the [Planet Python](https://planetpython.org/) RSS feed, with search, author lookup, a fully customizable daily digest subscription system, caching, and command logging. Deployed and running live on Railway with persistent storage.
 
 ## Features
 
@@ -10,7 +10,8 @@ A Telegram bot that fetches and delivers Python blog posts from the [Planet Pyth
 - In-memory caching of the RSS feed (5 minutes) to avoid redundant requests
 - Command usage logging to a local file
 - Input validation and graceful error handling if the feed is unreachable
-- Deployed on Railway, running continuously independent of any local machine
+- Deployed on Railway with a persistent volume, running continuously and surviving redeploys
+- Command menu and description configured via BotFather for discoverability
 
 ## Commands
 
@@ -63,7 +64,9 @@ A Telegram bot that fetches and delivers Python blog posts from the [Planet Pyth
 
 The bot is deployed on [Railway](https://railway.app), configured with:
 - `BOT_TOKEN` set as an environment variable (never committed to the repo)
-- An optional `DATA_DIR` environment variable, allowing `subscribers.json` and `bot.log` to be redirected to a persistent volume so subscriber data survives redeploys
+- A persistent volume mounted at `/data`
+- `DATA_DIR` set to `/data`, so `subscribers.json` and `bot.log` are written to the volume and survive redeploys
+- Command menu and bot description set via BotFather (`/setcommands`, `/setdescription`) for a more polished first-time user experience
 
 ## Project structure
 
@@ -77,9 +80,10 @@ The bot is deployed on [Railway](https://railway.app), configured with:
 
 - Posts are fetched from `https://planetpython.org/rss20.xml` and parsed with Python's built-in `xml.etree.ElementTree`.
 - Fetched posts are cached in memory for 5 minutes to reduce redundant network requests across commands.
-- Subscriber data (chat ID, preferred post count, and preferred delivery hour/minute) is stored locally in `subscribers.json`.
+- Subscriber data (chat ID, preferred post count, and preferred delivery hour/minute) is stored in `subscribers.json`, written to a persistent volume in production.
 - A background job runs every 60 seconds, checking the current UTC time against each subscriber's chosen time and sending their digest the moment it matches — so every subscriber gets their digest at their own chosen time, not a single fixed time for everyone.
 - Every command is wrapped with a logging decorator that records the chat ID, command name, and timestamp to `bot.log`.
+- The bot runs continuously on Railway, independent of any local machine — subscribers receive their digest on schedule regardless of whether any device is online.
 
 ## Notes
 
@@ -87,4 +91,3 @@ The bot is deployed on [Railway](https://railway.app), configured with:
 - Built with [`python-telegram-bot`](https://github.com/python-telegram-bot/python-telegram-bot) and [`requests`](https://pypi.org/project/requests/)
 - `subscribers.json` and `bot.log` are generated at runtime and excluded from version control
 - All digest times are in UTC; there is currently no per-user timezone conversion
-- Without a persistent volume attached on the hosting platform, subscriber data may not survive a redeploy
