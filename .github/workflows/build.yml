@@ -1,0 +1,22 @@
+# Name for the workflow
+name: Build Docker Image
+
+# Runs workflow whenever someone pushes a commit to the main branch
+on:
+  push:
+    branches: [main]
+
+# A job for the workflow with name build
+jobs:
+  build:
+    # To run the job on a fresh Ubuntu Linux VM
+    runs-on: ubuntu-latest
+    
+    # List of actions this job performs
+    steps:
+      - name: Check out Repo # uses means "run someone else's pre-built action" instead of a raw shell command
+        uses: actions/checkout@v4 # Downloads the repo's code onto the fresh VM
+
+      - name: Build Docker Image
+        run: docker build -t telegram_bot .
+
