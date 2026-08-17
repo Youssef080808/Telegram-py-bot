@@ -11,12 +11,26 @@ jobs:
   build:
     # To run the job on a fresh Ubuntu Linux VM
     runs-on: ubuntu-latest
-    
-    # List of actions this job performs
-    steps:
-      - name: Check out Repo # uses means "run someone else's pre-built action" instead of a raw shell command
-        uses: actions/checkout@v4 # Downloads the repo's code onto the fresh VM
 
-      - name: Build Docker Image
-        run: docker build -t telegram_bot .
+    permissions:
+      contents: read # gives permission to read the GitHub repo's files
+      packages: write # Gives permission to publish/upload the image
+
+    steps:
+      - name: Check out Repo
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3 # Specific pre-built action
+        with:
+          registry: ghcr.io # Storage server for Docker images so its accesible from anywhere
+          username: ${{github.actor}} # Holds github username of whoever triggered the run
+          password: ${{secrets.GITHUB_TOKEN}} # auto-generated token by GH every single workflow run then destroyed after
+
+      - name: Build and Push Docker Image 
+        uses: docker/build-push-action@v6 # Builds and Docker image and pushes it into a registry
+        with: 
+          context: . # Tells where Dockerfile and code are located
+          push: true # Push image after building
+          tags: ghcr.io/youssef080808/telegram_bot:latest # Full name/address image will be given once uploaded
 
