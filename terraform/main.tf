@@ -25,7 +25,7 @@ resource "aws_security_group" "bot_sg" {
         from_port = 22
         to_port = 22
         protocol = "tcp"
-        cidr_blocks = ["156.195.107.186/32"]
+        cidr_blocks = ["156.195.49.134/32"]
     }
 
     # Outbound rules - What the instance can reach out to 
@@ -37,14 +37,20 @@ resource "aws_security_group" "bot_sg" {
         cidr_blocks = ["0.0.0.0/0"]
     }
 }
-# Resource type
-#resource "aws_instance" "bot" {
- # ami                    = "ami-0c1ac8a41498c1a9c"
- # instance_type          = "t3.micro"
- # key_name               = "telegram-bot-key"
- # vpc_security_group_ids = [aws_security_group.bot_sg.id]
+# The EC2 instance that runs the bot container
+resource "aws_instance" "bot" {
+  ami                    = "ami-08c6ddb4a5d9d363a" # Which OS the instance boots(Amazon Machine Image)
+  instance_type          = "t3.micro" # Hardware size
+  key_name               = "telegram-bot-key" # SSH key
+  vpc_security_group_ids = [aws_security_group.bot_sg.id] # List of security groups to attach
 
-  #tags = {
-  #  Name = "telegram-bot-server"
- # }
-#}
+  tags = {
+    Name = "telegram-bot-server" # Instance's name in the console
+  }
+}
+
+# To print bot's Public IP after configuring
+output "bot_public_ip" {
+  description = "Public IP of the bot instance"
+  value       = aws_instance.bot.public_ip
+}
