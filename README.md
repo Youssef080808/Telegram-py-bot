@@ -1,6 +1,6 @@
 # Telegram Planet Python Bot
 
-A Telegram bot that fetches and delivers Python blog posts from the [Planet Python](https://planetpython.org/) RSS feed, with search, author lookup, a fully customizable daily digest subscription system, caching, and command logging. Containerized with Docker, built and published to GitHub Container Registry automatically via GitHub Actions, and deployed on AWS EC2 infrastructure defined in Terraform.
+A Telegram bot that fetches and delivers Python blog posts from the [Planet Python](https://planetpython.org/) RSS feed, with search, author lookup, a fully customizable daily digest subscription system, caching, and command logging. Containerized with Docker, built and published to GitHub Container Registry automatically via GitHub Actions, and deployed on AWS EC2 infrastructure defined in Terraform — a single `terraform apply` provisions the instance and brings the bot up with no manual configuration.
 
 ## Features
 
@@ -14,6 +14,7 @@ A Telegram bot that fetches and delivers Python blog posts from the [Planet Pyth
 - Containerized with Docker for consistent, portable builds
 - CI/CD via GitHub Actions: every push to `main` builds the image and publishes it to GitHub Container Registry
 - AWS infrastructure (EC2 instance and security group) defined as code with Terraform
+- Instance self-configures on first boot via a `user_data` script — installs Docker and starts the container automatically
 - Runs continuously with an automatic restart policy and a host-mounted volume for persistent data
 
 ## Commands
@@ -109,10 +110,25 @@ The configuration provisions:
 
 - **A security group** allowing inbound SSH (TCP/22) from a single `/32` address only, with unrestricted egress so the instance can reach the Telegram API, GitHub Container Registry, and the Planet Python feed. Security groups are stateful, so no inbound rules are needed for responses to the bot's own outbound requests.
 - **A `t3.micro` EC2 instance** running Amazon Linux 2023, attached to that security group and using an existing EC2 key pair for SSH access.
+- **A `user_data` startup script** that runs as root on first boot: it installs and enables Docker, creates the data directory, and starts the bot container with a restart policy. The instance therefore comes up fully configured with no manual steps.
 
-The instance references the security group by attribute (`aws_security_group.bot_sg.id`) rather than by a hardcoded ID, so Terraform resolves the dependency order automatically and creates the security group first.
+The instance references the security group by attribute (`aws_security_group.bot_sg.id`) rather than by a hardcoded ID, so Terraform resolves the dependency order automatically and creates the security group first. `user_data_replace_on_change = true` is set so that editing the startup script forces instance replacement — otherwise the new script would be stored but never executed, since `user_data` only runs on first boot.
 
-Usage:
+### Secrets
+
+The bot token is declared as a required, `sensitive` input variable rather than hardcoded, so it is redacted in plan and apply output and never committed:
+
+```hcl
+variable "bot_token" {
+  description = "Telegram bot token"
+  type        = string
+  sensitive   = true
+}
+```
+
+The value is supplied via a gitignored `terraform.tfvars` file. Note that `sensitive = true` affects display only — the value is still written to `terraform.tfstate`, which is why that file is also gitignored.
+
+### Usage
 
 ```bash
 cd terraform
@@ -121,42 +137,33 @@ terraform plan     # preview changes without applying them
 terraform apply    # create or update the infrastructure
 ```
 
-Credentials are read from the local AWS CLI configuration and are never stored in the repository. `terraform.tfstate` is gitignored, as it records real resource identifiers.
+AWS credentials are read from the local AWS CLI configuration and are never stored in the repository. After a successful apply, the instance's public IP is printed as a Terraform output.
 
 This project was originally deployed on [Railway](https://railway.app) as a managed platform deployment, then migrated to a manually provisioned EC2 instance, and finally to the Terraform-managed infrastructure described here.
 
 ## Deployment
 
-Terraform provisions the instance and security group; the Docker runtime and container are then configured on the instance:
+Because host configuration lives in the Terraform `user_data` script, deploying from scratch is a single command — `terraform apply` provisions the instance, installs Docker, pulls the image published by CI, and starts the container. The equivalent manual steps, for reference or for running the container elsewhere, are:
 
-1. Install and enable Docker so the daemon starts automatically on reboot:
-   ```bash
-   sudo dnf install docker -y
-   sudo systemctl enable --now docker
-   sudo usermod -aG docker ec2-user
-   ```
+```bash
+sudo dnf install docker -y
+sudo systemctl enable --now docker
+sudo usermod -aG docker ec2-user
 
-2. Pull the image published by CI, so the server runs exactly the artifact produced by the pipeline:
-   ```bash
-   docker pull ghcr.io/youssef080808/telegram_bot:latest
-   ```
-
-3. Start the container in detached mode with a restart policy and a host-mounted data volume:
-   ```bash
-   docker run -d \
-     --name telegram-bot \
-     --restart unless-stopped \
-     -e BOT_TOKEN="your_actual_token_here" \
-     -v /home/ec2-user/data:/data \
-     ghcr.io/youssef080808/telegram_bot:latest
-   ```
+docker run -d \
+  --name telegram-bot \
+  --restart unless-stopped \
+  -e BOT_TOKEN="your_actual_token_here" \
+  -v /home/ec2-user/data:/data \
+  ghcr.io/youssef080808/telegram_bot:latest
+```
 
 - `--restart unless-stopped` ensures the bot comes back automatically after a crash or an instance reboot
 - `-v /home/ec2-user/data:/data` keeps `subscribers.json` and `bot.log` on the host filesystem, so subscriber state survives container replacement and image upgrades
 - `BOT_TOKEN` is passed in at runtime and is never committed to the repository or baked into the image
 - Command menu and bot description are set via BotFather (`/setcommands`, `/setdescription`)
 
-Deploying an updated version means pulling the latest image and recreating the container; the mounted data volume is unaffected. This host configuration step is currently manual — moving it into a Terraform `user_data` script so a fresh instance comes up fully configured is the natural next improvement.
+Updating to a newer image means pulling the latest tag and recreating the container; the mounted data volume is unaffected. Note that subscriber data lives on the instance's disk, so replacing the instance requires copying `subscribers.json` across.
 
 ## Project structure
 
@@ -165,7 +172,7 @@ Deploying an updated version means pulling the latest image and recreating the c
 - `requirements.txt` — dependencies needed for deployment
 - `Dockerfile` — defines the container image used for local runs, CI, and production
 - `.github/workflows/build.yml` — GitHub Actions workflow that builds and publishes the image on every push to `main`
-- `terraform/main.tf` — Terraform configuration defining the EC2 instance and security group
+- `terraform/main.tf` — Terraform configuration defining the EC2 instance, security group, and startup script
 - `subscribers.json` — generated at runtime, stores each subscriber's chat ID, post count, and digest time
 - `bot.log` — generated at runtime, records every command used with chat ID and timestamp
 
@@ -186,3 +193,4 @@ Deploying an updated version means pulling the latest image and recreating the c
 - All digest times are in UTC; there is currently no per-user timezone conversion
 - Subscriber state is currently stored in a JSON file, which is sufficient at the current scale; migrating to SQLite would be the natural next step for concurrent writes and querying
 - The SSH ingress rule is pinned to a single IP address in the Terraform config and must be updated when that address changes
+- Deployment of a new image is currently a manual pull-and-recreate on the instance; extending the CI pipeline to update the running container would complete the continuous delivery story
