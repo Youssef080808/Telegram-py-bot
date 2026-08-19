@@ -8,6 +8,13 @@ terraform {
     }
 }
 
+# Input to bot instance configuration
+variable "bot_token" {
+    description = "Telegram bot token"
+    type = string
+    sensitive = true # To redact value in plan/apply output
+}
+
 # Configures the AWS provider, credentials come from ~/.aws/credentials
 provider "aws" {
     region = "eu-north-1"
@@ -43,6 +50,24 @@ resource "aws_instance" "bot" {
   instance_type          = "t3.micro" # Hardware size
   key_name               = "telegram-bot-key" # SSH key
   vpc_security_group_ids = [aws_security_group.bot_sg.id] # List of security groups to attach
+
+  user_data_replace_on_change = true
+
+  user_data = <<-EOF
+    #!/bin/bash
+    dnf install docker -y
+    systemctl enable --now docker
+    usermod -aG docker ec2-user
+    mkdir -p /home/ec2-user/data
+    chown ec2-user:ec2-user /home/ec2-user/data
+    docker run -d \
+        --name telegram-bot \
+        --restart unless-stopped \
+        -e BOT_TOKEN="${var.bot_token}" \
+        -v /home/ec2-user/data:/data \
+        ghcr.io/youssef080808/telegram_bot:latest
+
+  EOF
 
   tags = {
     Name = "telegram-bot-server" # Instance's name in the console
