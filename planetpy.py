@@ -1,18 +1,89 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 import random
-import json
 import datetime as dt
 import xml.etree.ElementTree as cElementTree
 import requests
 import time
 import os
+import sqlite3
 
 DATA_DIR = os.environ.get("DATA_DIR", ".")
 
+# Where the DataBase file lives
+DB_PATH = os.path.join(DATA_DIR, "subscribers.db")
 
 cache = {"data": None, "timestamp": 0} # cache dictionary to store the latest blog posts 
 # and the timestamp of when they were fetched
+
+# Creates and returns a connection with its configuration 
+def get_connection():
+    conn = sqlite3.connect(DB_PATH) # Opens database file/Creates it if it doesn't exist
+    conn.row_factory = sqlite3.Row # To access fields by name
+    return conn # Return connection
+
+# Creates the table if it doesn't already exist
+def init_db():
+    conn = get_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS subscribers (
+            chat_id TEXT PRIMARY KEY,
+            count INTEGER NOT NULL,
+            hour INTEGER NOT NULL,
+            minute INTEGER NOT NULL
+        )
+    """)
+    conn.commit() # To prevent Table from disappearing after coneection is closed
+    conn.close()
+
+# Gets and returns subscribtion details of subscirber with given chat ID
+def get_subscriber(chat_id):
+    conn = get_connection()
+    row = conn.execute(
+        # Parameterized Query to prevent SQL injection 
+        "SELECT count, hour, minute FROM subscribers WHERE chat_id=?",
+        (chat_id,) # Comma is to show its a tuple if only one element present
+    ).fetchone() # Fethches one row (first row it finds) or returns None
+    conn.close()
+    return row
+# Adds/Replaces subscriber details into DB 
+def add_subscriber(chat_id, count, hour=16, minute=0):
+    conn = get_connection()
+    conn.execute(
+        "INSERT OR REPLACE INTO subscribers (chat_id, count, hour, minute) VALUES (?, ?, ?, ?)",
+        (chat_id, count, hour, minute)
+    )
+    conn.commit()
+    conn.close()
+
+# Updates the new time set by subscriber with given chat ID
+def update_time(chat_id, hour, minute):
+    conn = get_connection()
+    cursor = conn.execute(
+        "UPDATE subscribers SET hour = ?, minute = ? WHERE chat_id = ?",
+        (hour, minute, chat_id)
+    )
+    conn.commit()
+    changed = cursor.rowcount # How many rows the statement affected
+    conn.close()
+    return changed > 0
+
+# Deletes subscirber with given chat ID
+def remove_subscriber(chat_id):
+    conn = get_connection()
+    conn.execute("DELETE FROM subscribers WHERE chat_id = ?", (chat_id,))
+    conn.commit()
+    conn.close()
+
+# Gets all subscribers due to be sent the daily post at given hour and minute
+def get_due_subscribers(hour, minute):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT chat_id, count FROM subscribers WHERE hour = ? AND minute = ?",
+        (hour, minute)
+    ).fetchall() # gets all rows 
+    conn.close()
+    return rows
 
 # Parses first 10 items from http://planetpython.org/rss20.xml and returns a list of 
 # dictionaries with the title, link, and description of each item.
@@ -164,19 +235,6 @@ async def author_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = "\n\n".join([f"{p['title']}\n{p['link']}" for p in matched_posts])
     await update.message.reply_text(message)
 
-# retrieves the list of subscribed chat IDs from the JSON file
-def get_chat_ids():
-    try:
-        with open(os.path.join(DATA_DIR, "subscribers.json"), "r") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}  
-    
-# saves the updated list of subscribed chat IDs to the JSON file
-def save_subs(subs : dict):
-    with open(os.path.join(DATA_DIR, "subscribers.json"), "w") as f:
-        json.dump(subs,f)
-
 # subscribes the user to the bot and saves their chat ID and the number of blog posts they
 #  want to receive per digest
 @log_command
@@ -194,9 +252,7 @@ async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Please provide a number 0-10")
             return
     chat_id = str(update.effective_chat.id)
-    chat_ids = get_chat_ids()
-    chat_ids[chat_id] = {"count" : number, "hour" : 16, "minute" : 0}
-    save_subs(chat_ids)
+    add_subscriber(chat_id, number)
     await update.message.reply_text(f"You're subscribed! You'll get {number} posts per digest at 16:00 UTC by default. Use /settime to change it.")
 
 
@@ -216,50 +272,42 @@ async def settime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hour = int(context.args[0])
     minute = int(context.args[1])
     chat_id = str(update.effective_chat.id)
-    chat_ids = get_chat_ids()
-    if chat_ids.get(chat_id, None) is None:
+    if not update_time(chat_id, hour, minute):
         await update.message.reply_text("You are not subscribed thus you can't set a time.\n"
         "You can subscribe using the /subscribe command. To see how to use it use /help command.")
         return
-    chat_ids[chat_id]["hour"] = hour
-    chat_ids[chat_id]["minute"] = minute
-    save_subs(chat_ids)
     await update.message.reply_text(f"Time succesfully changed to {hour}:{minute:02d}")
 
 
 # unsubscribes the user from the bot and removes their chat ID from the list of subscribed users
 @log_command
 async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_ids = get_chat_ids()
     chat_id = str(update.effective_chat.id)
-    chat_ids.pop(chat_id, None)
-    save_subs(chat_ids)
+    remove_subscriber(chat_id)
     await update.message.reply_text("Unsubscribed succesfully")
 
 # sends the daily digest of blog posts to all subscribed users at 16:00 UTC
 async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
-    chat_ids = get_chat_ids()
     now = dt.datetime.now(dt.timezone.utc)
-    for cid in chat_ids:
-        if chat_ids[cid]["hour"] == now.hour and chat_ids[cid]["minute"] == now.minute:
-            number = chat_ids[cid]["count"] 
-            posts = parse_planetpy_rss(number)
-            if not posts:
-                await context.bot.send_message(chat_id=cid, text="Couldn't reach latest Planet Python blog posts. Please try again later.")
-            else:
-                message = "\n\n".join([f"{p['title']}\n{p['link']}" for p in posts])
-                await context.bot.send_message(chat_id=cid, text=message)
+    chat_ids = get_due_subscribers(now.hour, now.minute)
+    for row in chat_ids: 
+        count = row["count"]
+        posts = parse_planetpy_rss(count)
+        if not posts:
+            await context.bot.send_message(chat_id=row["chat_id"], text="Couldn't reach latest Planet Python blog posts. Please try again later.")
+        else:
+            message = "\n\n".join([f"{p['title']}\n{p['link']}" for p in posts])
+            await context.bot.send_message(chat_id=row["chat_id"], text=message)
 
 # shows the current subscription status and count of blog posts per digest for the user
 @log_command
 async def mysettings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_ids = get_chat_ids()
     chat_id = str(update.effective_chat.id)
-    current = chat_ids.get(chat_id, None) # return value (count) associated with key (chat_id)
-    if current is None:
+    row = get_subscriber(chat_id)
+    if row is None:
         await update.message.reply_text("Current Status: unsubscribed")
         return
-    await update.message.reply_text(f"Current Status: subscribed, Count: {current['count']}, Time: {current['hour']}:{current['minute']:02d}")
+    await update.message.reply_text(f"Current Status: subscribed, Count: {row['count']}, Time: {row['hour']}:{row['minute']:02d}")
     return
 
 
