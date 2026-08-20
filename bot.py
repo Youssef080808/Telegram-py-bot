@@ -5,7 +5,9 @@ import os
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN") # replace with your bot token from BotFather
 
-if __name__ == "__main__": # if this script is being run directly, then execute the code
+# if this script is being run directly, then execute the code not when being imported by something else
+if __name__ == "__main__": 
+    p.init_db()
     app = ApplicationBuilder().token(BOT_TOKEN).build() #creates a bot application
     app.add_handler(CommandHandler("start", p.start_command)) # calls start_command() when user sends /start command
     app.add_handler(CommandHandler("feed", p.feed_command)) # calls feed_command() when user sends /feed command
