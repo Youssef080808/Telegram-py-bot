@@ -2,6 +2,7 @@ myenv/
 __pycache__/
 *.pyc
 subscribers.json
+*.db
 bot.log
 terraform/.terraform/
 terraform/*.tfstate
