@@ -1,12 +1,13 @@
 # Telegram Planet Python Bot
 
-A Telegram bot that fetches and delivers Python blog posts from the [Planet Python](https://planetpython.org/) RSS feed, with search, author lookup, a fully customizable daily digest subscription system, caching, and command logging. Containerized with Docker, built and published to GitHub Container Registry automatically via GitHub Actions, and deployed on AWS EC2 infrastructure defined in Terraform — a single `terraform apply` provisions the instance and brings the bot up with no manual configuration.
+A Telegram bot that fetches and delivers Python blog posts from the [Planet Python](https://planetpython.org/) RSS feed, with search, author lookup, a fully customizable daily digest subscription system, caching, and command logging. Subscriber state is stored in SQLite, the app is containerized with Docker, images are built and published to GitHub Container Registry via GitHub Actions, and the AWS EC2 infrastructure is defined in Terraform — a single `terraform apply` provisions the instance and brings the bot up with no manual configuration.
 
 ## Features
 
 - Fetches the latest posts from Planet Python's RSS feed
 - Search posts by keyword or author (title-based)
 - Subscribe to a daily digest, with a per-user post count and delivery time (UTC)
+- Subscriber state persisted in SQLite, with parameterized queries throughout
 - In-memory caching of the RSS feed (5 minutes) to avoid redundant requests
 - Command usage logging to a local file
 - Input validation and graceful error handling if the feed is unreachable
@@ -64,6 +65,53 @@ A Telegram bot that fetches and delivers Python blog posts from the [Planet Pyth
    python3 bot.py
    ```
 
+The SQLite database is created automatically on first run — `init_db()` issues a `CREATE TABLE IF NOT EXISTS`, so no separate setup step is needed.
+
+## Data storage
+
+Subscriber state lives in a SQLite database (`subscribers.db`) inside the data directory, in a single table:
+
+```sql
+CREATE TABLE IF NOT EXISTS subscribers (
+    chat_id TEXT PRIMARY KEY,
+    count   INTEGER NOT NULL,
+    hour    INTEGER NOT NULL,
+    minute  INTEGER NOT NULL
+);
+```
+
+`chat_id` as the primary key enforces one row per subscriber and indexes lookups. `NOT NULL` constraints mean invalid rows are rejected by the database rather than depending on application-level checks.
+
+Every query is parameterized with `?` placeholders and a separate value tuple, so user input is always treated as data rather than SQL — no string interpolation into queries.
+
+The data access layer exposes targeted operations rather than whole-file reads and writes:
+
+| Function | Operation |
+|---|---|
+| `get_subscriber(chat_id)` | `SELECT` one row, or `None` |
+| `add_subscriber(chat_id, count, hour, minute)` | `INSERT OR REPLACE` |
+| `update_time(chat_id, hour, minute)` | `UPDATE`; returns `False` if no row matched |
+| `remove_subscriber(chat_id)` | `DELETE` |
+| `get_due_subscribers(hour, minute)` | `SELECT` only subscribers whose digest time matches |
+
+`get_due_subscribers` in particular pushes the time filter into the query, so the digest job only receives rows that are actually due instead of loading every subscriber and filtering in Python.
+
+### Migrating from the previous JSON storage
+
+Earlier versions stored subscribers in `subscribers.json`. `migrate_to_sqlite.py` reads that file, if present, and inserts each record into the database. It uses `INSERT OR REPLACE`, so it is safe to run more than once.
+
+Run it against a deployed instance's data volume with:
+
+```bash
+docker run --rm \
+  -v /home/ec2-user/data:/data \
+  -e DATA_DIR=/data \
+  ghcr.io/youssef080808/telegram_bot:latest \
+  python3 migrate_to_sqlite.py
+```
+
+The trailing argument overrides the image's default command, so the container runs the migration and exits instead of starting the bot.
+
 ## Running with Docker
 
 The bot is fully containerized, so it can also be built and run without setting up a local Python environment.
@@ -79,7 +127,7 @@ The bot is fully containerized, so it can also be built and run without setting 
    ```
 
    - `-e BOT_TOKEN=...` sets the bot token as an environment variable inside the container
-   - `-v $(pwd)/data:/data` maps a `data/` folder on the host machine to `/data` inside the container, so `subscribers.json` and `bot.log` persist across container restarts and rebuilds
+   - `-v $(pwd)/data:/data` maps a `data/` folder on the host machine to `/data` inside the container, so `subscribers.db` and `bot.log` persist across container restarts and rebuilds
 
 The image is based on `python:3.11-slim`, installs dependencies from `requirements.txt`, sets `DATA_DIR=/data`, and runs `bot.py` as its entry point.
 
@@ -159,38 +207,38 @@ docker run -d \
 ```
 
 - `--restart unless-stopped` ensures the bot comes back automatically after a crash or an instance reboot
-- `-v /home/ec2-user/data:/data` keeps `subscribers.json` and `bot.log` on the host filesystem, so subscriber state survives container replacement and image upgrades
+- `-v /home/ec2-user/data:/data` keeps `subscribers.db` and `bot.log` on the host filesystem, so subscriber state survives container replacement and image upgrades
 - `BOT_TOKEN` is passed in at runtime and is never committed to the repository or baked into the image
 - Command menu and bot description are set via BotFather (`/setcommands`, `/setdescription`)
 
-Updating to a newer image means pulling the latest tag and recreating the container; the mounted data volume is unaffected. Note that subscriber data lives on the instance's disk, so replacing the instance requires copying `subscribers.json` across.
+Updating to a newer image means pulling the latest tag and recreating the container; the mounted data volume is unaffected. Note that subscriber data lives on the instance's disk, so replacing the instance requires copying `subscribers.db` across.
 
 ## Project structure
 
-- `bot.py` — entry point; builds the app, registers command handlers, and starts polling
-- `planetpy.py` — RSS parsing/caching, all command logic, the logging decorator, and subscriber storage
+- `bot.py` — entry point; initializes the database, registers command handlers, and starts polling
+- `planetpy.py` — RSS parsing/caching, the SQLite data access layer, all command logic, and the logging decorator
+- `migrate_to_sqlite.py` — one-off script that imports records from the legacy `subscribers.json` into the database
 - `requirements.txt` — dependencies needed for deployment
 - `Dockerfile` — defines the container image used for local runs, CI, and production
 - `.github/workflows/build.yml` — GitHub Actions workflow that builds and publishes the image on every push to `main`
 - `terraform/main.tf` — Terraform configuration defining the EC2 instance, security group, and startup script
-- `subscribers.json` — generated at runtime, stores each subscriber's chat ID, post count, and digest time
+- `subscribers.db` — generated at runtime, stores each subscriber's chat ID, post count, and digest time
 - `bot.log` — generated at runtime, records every command used with chat ID and timestamp
 
 ## How it works
 
 - Posts are fetched from `https://planetpython.org/rss20.xml` and parsed with Python's built-in `xml.etree.ElementTree`.
 - Fetched posts are cached in memory for 5 minutes to reduce redundant network requests across commands.
-- Subscriber data (chat ID, preferred post count, and preferred delivery hour/minute) is stored in `subscribers.json`, written to a host-mounted volume in production.
-- A background job runs every 60 seconds, checking the current UTC time against each subscriber's chosen time and sending their digest the moment it matches — so every subscriber gets their digest at their own chosen time, not a single fixed time for everyone.
+- Subscriber data is stored in a SQLite database on the mounted volume, so it survives container replacement.
+- A background job runs every 60 seconds and queries for subscribers whose configured hour and minute match the current UTC time, sending each their digest — so every subscriber gets their digest at their own chosen time, not a single fixed time for everyone.
 - Every command is wrapped with a logging decorator that records the chat ID, command name, and timestamp to `bot.log`.
 - The bot runs continuously on the EC2 instance, independent of any local machine — subscribers receive their digest on schedule regardless of whether any device is online.
 
 ## Notes
 
 - Requires Python 3.9+
-- Built with [`python-telegram-bot`](https://github.com/python-telegram-bot/python-telegram-bot) and [`requests`](https://pypi.org/project/requests/)
-- `subscribers.json` and `bot.log` are generated at runtime and excluded from version control
+- Built with [`python-telegram-bot`](https://github.com/python-telegram-bot/python-telegram-bot) and [`requests`](https://pypi.org/project/requests/); SQLite access uses the standard library's `sqlite3` module, so it adds no dependencies
+- `subscribers.db` and `bot.log` are generated at runtime and excluded from version control
 - All digest times are in UTC; there is currently no per-user timezone conversion
-- Subscriber state is currently stored in a JSON file, which is sufficient at the current scale; migrating to SQLite would be the natural next step for concurrent writes and querying
 - The SSH ingress rule is pinned to a single IP address in the Terraform config and must be updated when that address changes
 - Deployment of a new image is currently a manual pull-and-recreate on the instance; extending the CI pipeline to update the running container would complete the continuous delivery story
