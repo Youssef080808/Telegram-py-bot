@@ -20,7 +20,7 @@ provider "aws" {
     region = "eu-north-1"
 }
 
-# Resource type 
+# Resource type to call AWS to create the security group 
 resource "aws_security_group" "bot_sg" {
     name = "telegram-bot-sg"
     description = "Security group for the Telegram bot instance"
@@ -51,6 +51,8 @@ resource "aws_instance" "bot" {
   key_name               = "telegram-bot-key" # SSH key
   vpc_security_group_ids = [aws_security_group.bot_sg.id] # List of security groups to attach
 
+  iam_instance_profile = aws_iam_instance_profile.bot_profile.name # Attaches the profile to the instance
+
   user_data_replace_on_change = true
 
   user_data = <<-EOF
@@ -78,4 +80,36 @@ resource "aws_instance" "bot" {
 output "bot_public_ip" {
   description = "Public IP of the bot instance"
   value       = aws_instance.bot.public_ip
+}
+
+# Lets EC2 instances assume this role (data to Read the role)
+data "aws_iam_policy_document" "ssm_assume_role" {
+    # One rule in IAM policy
+    statement {
+        # Permits : API call for taking on a role's identity
+        actions = ["sts:AssumeRole"]
+        # EC2 Sevice is allowed to assume this Role
+        principals {
+            type = "Service"
+            identifiers = ["ec2.amazonaws.com"]
+        }
+    }
+}
+
+# Calls AWS to create IAM Role
+resource "aws_iam_role" "bot_ssm_role" {
+    name = "telegram-bot-ssm-role"
+    assume_role_policy = data.aws_iam_policy_document.ssm_assume_role.json # The trust policy
+}
+
+# AWS-managed policy granting the permissions the SSM Agent needs
+resource "aws_iam_role_policy_attachment" "ssm_core" {
+  role       = aws_iam_role.bot_ssm_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" # What the Role can do
+}
+
+# The wrapper that attaches a role to an EC2 instance
+resource "aws_iam_instance_profile" "bot_profile" {
+  name = "telegram-bot-profile"
+  role = aws_iam_role.bot_ssm_role.name
 }
