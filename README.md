@@ -1,6 +1,6 @@
 # Telegram Planet Python Bot
 
-A Telegram bot that fetches and delivers Python blog posts from the [Planet Python](https://planetpython.org/) RSS feed, with search, author lookup, a fully customizable daily digest subscription system, caching, and command logging. Subscriber state is stored in SQLite, the app is containerized with Docker, images are built and published to GitHub Container Registry via GitHub Actions, and the AWS EC2 infrastructure is defined in Terraform — a single `terraform apply` provisions the instance and brings the bot up with no manual configuration.
+A Telegram bot that fetches and delivers Python blog posts from the [Planet Python](https://planetpython.org/) RSS feed, with search, author lookup, a fully customizable daily digest subscription system, caching, and command logging. Subscriber state is stored in SQLite, the app is containerized with Docker, and the AWS infrastructure is defined in Terraform. A push to `main` builds the image, publishes it to GitHub Container Registry, and redeploys the running container on EC2 — with no SSH access and no inbound ports opened.
 
 ## Features
 
@@ -13,9 +13,10 @@ A Telegram bot that fetches and delivers Python blog posts from the [Planet Pyth
 - Input validation and graceful error handling if the feed is unreachable
 - Command menu and description configured via BotFather for discoverability
 - Containerized with Docker for consistent, portable builds
-- CI/CD via GitHub Actions: every push to `main` builds the image and publishes it to GitHub Container Registry
-- AWS infrastructure (EC2 instance and security group) defined as code with Terraform
+- Full CI/CD: every push to `main` builds, publishes, and deploys automatically
+- AWS infrastructure (EC2 instance, security group, IAM role) defined as code with Terraform
 - Instance self-configures on first boot via a `user_data` script — installs Docker and starts the container automatically
+- Deployments delivered through AWS Systems Manager, so no SSH keys are stored in CI and no inbound ports are exposed
 - Runs continuously with an automatic restart policy and a host-mounted volume for persistent data
 
 ## Commands
@@ -139,16 +140,57 @@ docker pull ghcr.io/youssef080808/telegram_bot:latest
 
 ## CI/CD
 
-A GitHub Actions workflow (`.github/workflows/build.yml`) runs on every push to `main` and:
+A GitHub Actions workflow (`.github/workflows/build.yml`) runs on every push to `main`, split into two jobs.
+
+### Build
 
 1. Checks out the repository code onto a clean Ubuntu runner
 2. Authenticates to GitHub Container Registry using the workflow's automatically provisioned `GITHUB_TOKEN`
 3. Builds the Docker image from the same `Dockerfile` used for local development
 4. Publishes the image to `ghcr.io/youssef080808/telegram_bot:latest`
 
-This means build-breaking changes are caught immediately rather than at deploy time, and every commit to `main` produces a pullable artifact that the production server can fetch directly — no manual image transfer between the development machine and the server.
+The job requests only the permissions it needs (`contents: read` for checkout, `packages: write` for publishing), rather than relying on broader default permissions.
 
-The workflow requests only the permissions it needs (`contents: read` for checkout, `packages: write` for publishing), rather than relying on broader default permissions.
+### Deploy
+
+The deploy job declares `needs: build`, so it runs only after a successful build — never against an image that has not been published. It then authenticates to AWS and issues a Systems Manager command instructing the instance to pull the new image and recreate the container:
+
+```bash
+aws ssm send-command \
+  --instance-ids "$EC2_INSTANCE_ID" \
+  --document-name "AWS-RunShellScript" \
+  --parameters 'commands=[
+    "docker pull ghcr.io/youssef080808/telegram_bot:latest",
+    "docker rm -f telegram-bot",
+    "docker run -d --name telegram-bot --restart unless-stopped --env-file /etc/telegram-bot.env -v /home/ec2-user/data:/data ghcr.io/youssef080808/telegram_bot:latest"
+  ]'
+```
+
+### Why Systems Manager rather than SSH
+
+The obvious way to deploy from CI is to store a private key as a repository secret and have the workflow SSH into the server. That approach has two costs: a key with shell access to production lives in GitHub, and the security group has to permit inbound SSH from GitHub's runner IP ranges, which are broad and change over time.
+
+Systems Manager inverts the direction of the connection. An agent on the instance opens an outbound HTTPS connection to AWS and waits for instructions; AWS hands queued commands to it over that existing channel. As a result:
+
+- No inbound port is opened — the security group still permits SSH from a single IP and nothing else
+- No SSH key is stored in CI
+- The instance holds no long-lived AWS credentials; an attached IAM role supplies rotating temporary ones
+
+This is the same pattern the bot itself uses. Telegram never connects inbound; the bot polls outbound.
+
+### Credentials and least privilege
+
+Three identities are involved, each scoped to its own job:
+
+| Identity | Purpose | Permissions |
+|---|---|---|
+| Instance IAM role | Lets the SSM Agent register and receive commands | `AmazonSSMManagedInstanceCore` |
+| `github-actions-deploy` IAM user | Lets the workflow issue deploy commands | `ssm:SendCommand`, scoped to one instance ARN and the `AWS-RunShellScript` document, plus read-only access to command results |
+| `terraform-user` IAM user | Local infrastructure changes | EC2 and IAM management |
+
+The deploy user's policy names the target instance explicitly, so those credentials cannot reach any other machine in the account even if they leak.
+
+The bot token is never passed through the pipeline. It is written by `user_data` to `/etc/telegram-bot.env` with `chmod 600`, and the container reads it via `--env-file`. The deploy command references the file path rather than the value, so the secret never appears in workflow definitions, SSM command history, or CI logs.
 
 ## Infrastructure (Terraform)
 
@@ -156,11 +198,12 @@ The AWS infrastructure is defined as code in `terraform/main.tf` rather than con
 
 The configuration provisions:
 
-- **A security group** allowing inbound SSH (TCP/22) from a single `/32` address only, with unrestricted egress so the instance can reach the Telegram API, GitHub Container Registry, and the Planet Python feed. Security groups are stateful, so no inbound rules are needed for responses to the bot's own outbound requests.
+- **A security group** allowing inbound SSH (TCP/22) from a single `/32` address only, with unrestricted egress so the instance can reach the Telegram API, GitHub Container Registry, AWS Systems Manager, and the Planet Python feed. Security groups are stateful, so no inbound rules are needed for responses to the instance's own outbound requests.
 - **A `t3.micro` EC2 instance** running Amazon Linux 2023, attached to that security group and using an existing EC2 key pair for SSH access.
-- **A `user_data` startup script** that runs as root on first boot: it installs and enables Docker, creates the data directory, and starts the bot container with a restart policy. The instance therefore comes up fully configured with no manual steps.
+- **An IAM role and instance profile** granting the SSM Agent the permissions it needs. Because this is a role rather than a user, AWS delivers rotating temporary credentials to the instance automatically — no access key is ever written to the server.
+- **A `user_data` startup script** that runs as root on first boot: it installs and enables Docker, creates the data directory, writes the bot token to a root-only environment file, and starts the container with a restart policy. The instance therefore comes up fully configured with no manual steps.
 
-The instance references the security group by attribute (`aws_security_group.bot_sg.id`) rather than by a hardcoded ID, so Terraform resolves the dependency order automatically and creates the security group first. `user_data_replace_on_change = true` is set so that editing the startup script forces instance replacement — otherwise the new script would be stored but never executed, since `user_data` only runs on first boot.
+The instance references the security group and instance profile by attribute rather than by hardcoded IDs, so Terraform resolves the dependency order automatically. `user_data_replace_on_change = true` is set so that editing the startup script forces instance replacement — otherwise the new script would be stored but never executed, since `user_data` only runs on first boot.
 
 ### Secrets
 
@@ -191,7 +234,9 @@ This project was originally deployed on [Railway](https://railway.app) as a mana
 
 ## Deployment
 
-Because host configuration lives in the Terraform `user_data` script, deploying from scratch is a single command — `terraform apply` provisions the instance, installs Docker, pulls the image published by CI, and starts the container. The equivalent manual steps, for reference or for running the container elsewhere, are:
+Routine deploys require no manual action: pushing to `main` builds the image and redeploys the container automatically.
+
+Provisioning from scratch is a single `terraform apply`, which creates the instance and brings the bot up via the `user_data` script. The equivalent manual steps, for reference or for running the container elsewhere, are:
 
 ```bash
 sudo dnf install docker -y
@@ -201,17 +246,16 @@ sudo usermod -aG docker ec2-user
 docker run -d \
   --name telegram-bot \
   --restart unless-stopped \
-  -e BOT_TOKEN="your_actual_token_here" \
+  --env-file /etc/telegram-bot.env \
   -v /home/ec2-user/data:/data \
   ghcr.io/youssef080808/telegram_bot:latest
 ```
 
 - `--restart unless-stopped` ensures the bot comes back automatically after a crash or an instance reboot
 - `-v /home/ec2-user/data:/data` keeps `subscribers.db` and `bot.log` on the host filesystem, so subscriber state survives container replacement and image upgrades
-- `BOT_TOKEN` is passed in at runtime and is never committed to the repository or baked into the image
-- Command menu and bot description are set via BotFather (`/setcommands`, `/setdescription`)
+- `--env-file /etc/telegram-bot.env` supplies the bot token from a root-only file written at provisioning time, so it is never baked into the image or passed through CI
 
-Updating to a newer image means pulling the latest tag and recreating the container; the mounted data volume is unaffected. Note that subscriber data lives on the instance's disk, so replacing the instance requires copying `subscribers.db` across.
+Note that subscriber data lives on the instance's disk, so replacing the instance requires copying `subscribers.db` across. Replacing the instance also changes its ID, which must be updated in the `EC2_INSTANCE_ID` repository secret and in the deploy user's IAM policy.
 
 ## Project structure
 
@@ -220,8 +264,8 @@ Updating to a newer image means pulling the latest tag and recreating the contai
 - `migrate_to_sqlite.py` — one-off script that imports records from the legacy `subscribers.json` into the database
 - `requirements.txt` — dependencies needed for deployment
 - `Dockerfile` — defines the container image used for local runs, CI, and production
-- `.github/workflows/build.yml` — GitHub Actions workflow that builds and publishes the image on every push to `main`
-- `terraform/main.tf` — Terraform configuration defining the EC2 instance, security group, and startup script
+- `.github/workflows/build.yml` — GitHub Actions workflow that builds, publishes, and deploys on every push to `main`
+- `terraform/main.tf` — Terraform configuration defining the EC2 instance, security group, IAM role, and startup script
 - `subscribers.db` — generated at runtime, stores each subscriber's chat ID, post count, and digest time
 - `bot.log` — generated at runtime, records every command used with chat ID and timestamp
 
@@ -240,5 +284,11 @@ Updating to a newer image means pulling the latest tag and recreating the contai
 - Built with [`python-telegram-bot`](https://github.com/python-telegram-bot/python-telegram-bot) and [`requests`](https://pypi.org/project/requests/); SQLite access uses the standard library's `sqlite3` module, so it adds no dependencies
 - `subscribers.db` and `bot.log` are generated at runtime and excluded from version control
 - All digest times are in UTC; there is currently no per-user timezone conversion
-- The SSH ingress rule is pinned to a single IP address in the Terraform config and must be updated when that address changes
-- Deployment of a new image is currently a manual pull-and-recreate on the instance; extending the CI pipeline to update the running container would complete the continuous delivery story
+
+### Known limitations
+
+- The SSH ingress rule is pinned to a single IP address in the Terraform config and must be updated when that address changes. A `http` data source resolving the current address at plan time would remove the manual step.
+- The AMI ID is hardcoded and will go stale as Amazon publishes newer Amazon Linux images. An `aws_ami` data source filtering on the latest release would keep it current.
+- `terraform.tfstate` is stored locally rather than in a remote backend, so it is not shared or locked. An S3 backend with DynamoDB locking would be the standard fix.
+- `terraform-user` currently holds `IAMFullAccess`, which is broader than the role and policy management this project actually needs.
+- The deploy job reports success once Systems Manager accepts the command, not once the container is confirmed healthy. Polling `ssm:GetCommandInvocation` for the result would close that gap.
