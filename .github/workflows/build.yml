@@ -33,4 +33,26 @@ jobs:
           context: . # Tells where Dockerfile and code are located
           push: true # Push image after building
           tags: ghcr.io/youssef080808/telegram_bot:latest # Full name/address image will be given once uploaded
+          
+    deploy:
+      needs: build
+      runs-on: ubuntu-latest
 
+      steps:
+        - name: Configure AWS credentials
+          uses: aws-actions/configure-aws-credentials@v4
+          with:
+            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+            aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            aws-region: eu-north-1
+
+        - name: Deploy new image to EC2 via SSM
+          run: |
+            aws ssm send-command \
+              --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+              --document-name "AWS-RunShellScript" \
+              --parameters 'commands=[
+                "docker pull ghcr.io/youssef080808/telegram_bot:latest",
+                "docker rm -f telegram-bot",
+                "docker run -d --name telegram-bot --restart unless-stopped --env-file /etc/telegram-bot.env -v /home/ec2-user/data:/data ghcr.io/youssef080808/telegram_bot:latest"
+              ]'
