@@ -132,7 +132,7 @@ def log_command(func):
 # context is extra tools and info, "starts the bot and sends a welcome message to the user"
 @log_command
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hi! Send /help to see all available commands.")
+    await update.message.reply_text("Hi! Send /help to see all the user available commands.")
     # update contains info about incoming message, and bot replies back
 
 # runs when someone send /feed command to the bot, "gets 10 latest blog posts from planetpython.org"
