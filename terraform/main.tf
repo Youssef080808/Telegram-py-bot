@@ -62,10 +62,14 @@ resource "aws_instance" "bot" {
     usermod -aG docker ec2-user
     mkdir -p /home/ec2-user/data
     chown ec2-user:ec2-user /home/ec2-user/data
+
+    echo "BOT_TOKEN=${var.bot_token}" > /etc/telegram-bot.env
+    chmod 600 /etc/telegram-bot.env
+
     docker run -d \
         --name telegram-bot \
         --restart unless-stopped \
-        -e BOT_TOKEN="${var.bot_token}" \
+        --env-file /etc/telegram-bot.env \
         -v /home/ec2-user/data:/data \
         ghcr.io/youssef080808/telegram_bot:latest
 
