@@ -194,7 +194,7 @@ The bot token is never passed through the pipeline. It is written by `user_data`
 
 ## Infrastructure (Terraform)
 
-The AWS infrastructure is defined as code in `terraform/main.tf` rather than configured by hand through the console, so the environment is version-controlled, reviewable, and reproducible from scratch.
+The AWS infrastructure is defined as code under `terraform/` rather than configured by hand through the console, so the environment is version-controlled, reviewable, and reproducible from scratch. The `terraform` block and provider requirements live in `terraform.tf`; the resources live in `main.tf`.
 
 The configuration provisions:
 
@@ -203,7 +203,25 @@ The configuration provisions:
 - **An IAM role and instance profile** granting the SSM Agent the permissions it needs. Because this is a role rather than a user, AWS delivers rotating temporary credentials to the instance automatically — no access key is ever written to the server.
 - **A `user_data` startup script** that runs as root on first boot: it installs and enables Docker, creates the data directory, writes the bot token to a root-only environment file, and starts the container with a restart policy. The instance therefore comes up fully configured with no manual steps.
 
-The instance references the security group and instance profile by attribute rather than by hardcoded IDs, so Terraform resolves the dependency order automatically. `user_data_replace_on_change = true` is set so that editing the startup script forces instance replacement — otherwise the new script would be stored but never executed, since `user_data` only runs on first boot.
+### Resolving the AMI dynamically
+
+The machine image is looked up at plan time rather than hardcoded:
+
+```hcl
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023*-x86_64"]
+  }
+}
+```
+
+This keeps the configuration current as Amazon publishes new releases, and removes a value that would otherwise silently go stale. The trade-off is that a new upstream release changes the resolved ID, and since `ami` forces replacement, a plan can propose destroying and recreating the instance even when nothing in the configuration changed. Pinning a specific AMI avoids that surprise at the cost of drifting out of date; this project accepts the churn in exchange for staying current, and the runbook below covers the data handling that replacement requires.
+
+The instance references the security group, instance profile, and AMI by attribute rather than by hardcoded IDs, so Terraform resolves the dependency order automatically. `user_data_replace_on_change = true` is set so that editing the startup script forces instance replacement — otherwise the new script would be stored but never executed, since `user_data` only runs on first boot.
 
 ### Secrets
 
@@ -255,7 +273,38 @@ docker run -d \
 - `-v /home/ec2-user/data:/data` keeps `subscribers.db` and `bot.log` on the host filesystem, so subscriber state survives container replacement and image upgrades
 - `--env-file /etc/telegram-bot.env` supplies the bot token from a root-only file written at provisioning time, so it is never baked into the image or passed through CI
 
-Note that subscriber data lives on the instance's disk, so replacing the instance requires copying `subscribers.db` across. Replacing the instance also changes its ID, which must be updated in the `EC2_INSTANCE_ID` repository secret and in the deploy user's IAM policy.
+### Replacing the instance
+
+Changing `ami` or `user_data` forces Terraform to destroy and recreate the instance, taking its disk with it. Subscriber data lives on that disk, so it has to be carried across by hand.
+
+**Before applying**, copy the database off and confirm it actually contains rows — a database with a schema and no rows is the same size and passes every superficial check:
+
+```bash
+scp -i ~/.ssh/telegram-bot-key.pem ec2-user@OLD_IP:/home/ec2-user/data/subscribers.db ~/subscribers-backup.db
+sqlite3 ~/subscribers-backup.db "SELECT * FROM subscribers;"
+```
+
+**After applying**, the new instance has already run `user_data`, so the bot is running and has created an empty `subscribers.db` owned by root. Restoring therefore needs the container stopped and a privileged move, rather than a direct overwrite:
+
+```bash
+# From the local machine — copy to the home directory, which ec2-user can write
+scp -i ~/.ssh/telegram-bot-key.pem ~/subscribers-backup.db ec2-user@NEW_IP:/home/ec2-user/
+
+# On the instance
+docker stop telegram-bot
+sudo mv /home/ec2-user/subscribers-backup.db /home/ec2-user/data/subscribers.db
+docker start telegram-bot
+
+# Confirm the rows are readable through the application's own data layer
+docker exec telegram-bot python3 -c "import planetpy as p; print(p.get_subscriber('CHAT_ID'))"
+```
+
+Copying directly into `data/` fails with a permission error because the running container created the file as root, and copying while the container is running risks the open SQLite handle overwriting what was just restored.
+
+Replacement also changes the instance ID, which must be updated in two places before the next deploy will work:
+
+1. The `EC2_INSTANCE_ID` repository secret
+2. The instance ARN in the `github-actions-ssm-deploy` IAM policy
 
 ## Project structure
 
@@ -265,7 +314,8 @@ Note that subscriber data lives on the instance's disk, so replacing the instanc
 - `requirements.txt` — dependencies needed for deployment
 - `Dockerfile` — defines the container image used for local runs, CI, and production
 - `.github/workflows/build.yml` — GitHub Actions workflow that builds, publishes, and deploys on every push to `main`
-- `terraform/main.tf` — Terraform configuration defining the EC2 instance, security group, IAM role, and startup script
+- `terraform/terraform.tf` — Terraform settings and provider version constraints
+- `terraform/main.tf` — the EC2 instance, security group, IAM role, AMI lookup, and startup script
 - `subscribers.db` — generated at runtime, stores each subscriber's chat ID, post count, and digest time
 - `bot.log` — generated at runtime, records every command used with chat ID and timestamp
 
@@ -287,8 +337,9 @@ Note that subscriber data lives on the instance's disk, so replacing the instanc
 
 ### Known limitations
 
-- The SSH ingress rule is pinned to a single IP address in the Terraform config and must be updated when that address changes. A `http` data source resolving the current address at plan time would remove the manual step.
-- The AMI ID is hardcoded and will go stale as Amazon publishes newer Amazon Linux images. An `aws_ami` data source filtering on the latest release would keep it current.
+- Subscriber data is not backed up automatically. It lives only on the instance's root volume, so instance replacement requires the manual runbook above, and an instance failure would lose it outright. Scheduled snapshots, or moving the database onto a separate EBS volume that survives replacement, would address this.
+- Instance replacement requires manually updating the `EC2_INSTANCE_ID` secret and the deploy policy's instance ARN. Targeting by tag rather than by instance ID would remove both steps.
+- The SSH ingress rule is pinned to a single IP address and must be updated when that address changes. An `http` data source resolving the current address at plan time would remove the manual step.
 - `terraform.tfstate` is stored locally rather than in a remote backend, so it is not shared or locked. An S3 backend with DynamoDB locking would be the standard fix.
 - `terraform-user` currently holds `IAMFullAccess`, which is broader than the role and policy management this project actually needs.
 - The deploy job reports success once Systems Manager accepts the command, not once the container is confirmed healthy. Polling `ssm:GetCommandInvocation` for the result would close that gap.
