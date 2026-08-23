@@ -164,7 +164,7 @@ async def feed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # shows current available commands
 @log_command
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("These are the commands you can use:\n\n"
+    await update.message.reply_text("These are the user available commands:\n\n"
     "/start: starts the bot and shows a welcome message.\n\n"
     "/help: shows this list of available commands and how to use them.\n\n"
     "/feed x: this sends you the x latest blog posts from Planet Python (1-10). If no number is provided, it defaults to 10.\n\n"
@@ -183,7 +183,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def random_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     latest_blogs = parse_planetpy_rss(10) # list of 10 dictionaries
     if not latest_blogs:
-        await update.message.reply_text("Couldn't reach latest Planet Python blog posts. Please try again later.")
+        await update.message.reply_text("Unable to reach latest Planet Python blog posts. Please try again later.")
         return
     random_blog = random.choice(latest_blogs) # selects a random blog post from the list
     message = f"{random_blog['title']}\n{random_blog['link']}"
