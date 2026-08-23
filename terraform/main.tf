@@ -10,6 +10,17 @@ provider "aws" {
     region = "eu-north-1"
 }
 
+# Looks up the most recent Amazon Linux 2023 AMI in this region
+data "aws_ami" "amazon_linux" {
+    most_recent = true
+    owners = ["amazon"]
+
+    filter {
+        name = "name"
+        values = ["al2023-ami-2023*-x86_64"]
+    }
+}
+
 # Resource type to call AWS to create the security group 
 resource "aws_security_group" "bot_sg" {
     name = "telegram-bot-sg"
@@ -36,7 +47,7 @@ resource "aws_security_group" "bot_sg" {
 }
 # The EC2 instance that runs the bot container
 resource "aws_instance" "bot" {
-  ami                    = "ami-08c6ddb4a5d9d363a" # Which OS the instance boots(Amazon Machine Image)
+  ami                    = data.aws_ami.amazon_linux.id # Which OS the instance boots(Amazon Machine Image)
   instance_type          = "t3.micro" # Hardware size
   key_name               = "telegram-bot-key" # SSH key
   vpc_security_group_ids = [aws_security_group.bot_sg.id] # List of security groups to attach
