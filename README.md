@@ -194,7 +194,18 @@ The bot token is never passed through the pipeline. It is written by `user_data`
 
 ## Infrastructure (Terraform)
 
-The AWS infrastructure is defined as code under `terraform/` rather than configured by hand through the console, so the environment is version-controlled, reviewable, and reproducible from scratch. The `terraform` block and provider requirements live in `terraform.tf`; the resources live in `main.tf`.
+The AWS infrastructure is defined as code under `terraform/` rather than configured by hand through the console, so the environment is version-controlled, reviewable, and reproducible from scratch.
+
+The configuration is split by role rather than kept in one file, following the usual Terraform convention:
+
+| File | Contents |
+|---|---|
+| `terraform.tf` | The `terraform` block: provider requirements and `required_version` |
+| `variables.tf` | Input variables and their defaults |
+| `main.tf` | Provider configuration, data sources, and resources |
+| `outputs.tf` | Values printed after a successful apply |
+
+Terraform reads every `.tf` file in the directory and treats them as a single configuration, so the split is purely for readability.
 
 The configuration provisions:
 
@@ -223,6 +234,33 @@ This keeps the configuration current as Amazon publishes new releases, and remov
 
 The instance references the security group, instance profile, and AMI by attribute rather than by hardcoded IDs, so Terraform resolves the dependency order automatically. `user_data_replace_on_change = true` is set so that editing the startup script forces instance replacement — otherwise the new script would be stored but never executed, since `user_data` only runs on first boot.
 
+### Variables and version pinning
+
+Values that might reasonably change are declared as input variables with sensible defaults, rather than being scattered through the resource blocks:
+
+```hcl
+variable "instance_type" {
+  description = "The EC2 instance type"
+  type        = string
+  default     = "t3.micro"
+}
+```
+
+Both the provider and the Terraform CLI itself are version-constrained, so a future release cannot silently change how this configuration behaves:
+
+```hcl
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"   # accept 5.x, but not 6.0
+    }
+  }
+
+  required_version = ">= 1.5"
+}
+```
+
 ### Secrets
 
 The bot token is declared as a required, `sensitive` input variable rather than hardcoded, so it is redacted in plan and apply output and never committed:
@@ -246,7 +284,15 @@ terraform plan     # preview changes without applying them
 terraform apply    # create or update the infrastructure
 ```
 
-AWS credentials are read from the local AWS CLI configuration and are never stored in the repository. After a successful apply, the instance's public IP is printed as a Terraform output.
+AWS credentials are read from the local AWS CLI configuration and are never stored in the repository.
+
+After a successful apply, the instance's public IP and ID are exposed as outputs, so neither has to be looked up in the console:
+
+```bash
+terraform output                    # both values
+terraform output bot_public_ip      # just the IP
+terraform output ec2_instance_id    # just the instance ID
+```
 
 This project was originally deployed on [Railway](https://railway.app) as a managed platform deployment, then migrated to a manually provisioned EC2 instance, and finally to the Terraform-managed infrastructure described here.
 
@@ -280,15 +326,15 @@ Changing `ami` or `user_data` forces Terraform to destroy and recreate the insta
 **Before applying**, copy the database off and confirm it actually contains rows — a database with a schema and no rows is the same size and passes every superficial check:
 
 ```bash
-scp -i ~/.ssh/telegram-bot-key.pem ec2-user@OLD_IP:/home/ec2-user/data/subscribers.db ~/subscribers-backup.db
-sqlite3 ~/subscribers-backup.db "SELECT * FROM subscribers;"
+scp -i ~/Desktop/telegram-bot-key.pem ec2-user@OLD_IP:/home/ec2-user/data/subscribers.db ~/Desktop/subscribers-backup.db
+sqlite3 ~/Desktop/subscribers-backup.db "SELECT * FROM subscribers;"
 ```
 
 **After applying**, the new instance has already run `user_data`, so the bot is running and has created an empty `subscribers.db` owned by root. Restoring therefore needs the container stopped and a privileged move, rather than a direct overwrite:
 
 ```bash
 # From the local machine — copy to the home directory, which ec2-user can write
-scp -i ~/.ssh/telegram-bot-key.pem ~/subscribers-backup.db ec2-user@NEW_IP:/home/ec2-user/
+scp -i ~/Desktop/telegram-bot-key.pem ~/Desktop/subscribers-backup.db ec2-user@NEW_IP:/home/ec2-user/
 
 # On the instance
 docker stop telegram-bot
@@ -301,7 +347,13 @@ docker exec telegram-bot python3 -c "import planetpy as p; print(p.get_subscribe
 
 Copying directly into `data/` fails with a permission error because the running container created the file as root, and copying while the container is running risks the open SQLite handle overwriting what was just restored.
 
-Replacement also changes the instance ID, which must be updated in two places before the next deploy will work:
+Replacement also changes the instance's IP and ID. Both are available from the outputs:
+
+```bash
+terraform output
+```
+
+The new instance ID must then be updated in two places before the next deploy will work:
 
 1. The `EC2_INSTANCE_ID` repository secret
 2. The instance ARN in the `github-actions-ssm-deploy` IAM policy
@@ -315,7 +367,9 @@ Replacement also changes the instance ID, which must be updated in two places be
 - `Dockerfile` — defines the container image used for local runs, CI, and production
 - `.github/workflows/build.yml` — GitHub Actions workflow that builds, publishes, and deploys on every push to `main`
 - `terraform/terraform.tf` — Terraform settings and provider version constraints
+- `terraform/variables.tf` — input variables (bot token, instance type, instance name)
 - `terraform/main.tf` — the EC2 instance, security group, IAM role, AMI lookup, and startup script
+- `terraform/outputs.tf` — the instance's public IP and ID, printed after apply
 - `subscribers.db` — generated at runtime, stores each subscriber's chat ID, post count, and digest time
 - `bot.log` — generated at runtime, records every command used with chat ID and timestamp
 
