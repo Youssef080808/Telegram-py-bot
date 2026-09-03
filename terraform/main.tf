@@ -26,7 +26,7 @@ resource "aws_security_group" "bot_sg" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["156.195.49.134/32"]
+    cidr_blocks = ["132.216.195.12/32"]
   }
 
   # Outbound rules - What the instance can reach out to 
@@ -55,6 +55,10 @@ resource "aws_instance" "bot" {
     dnf install docker -y
     systemctl enable --now docker
     usermod -aG docker ec2-user
+
+    dnf install cronie -y
+    systemctl enable --now crond
+
     mkdir -p /home/ec2-user/data
     chown ec2-user:ec2-user /home/ec2-user/data
 
@@ -67,6 +71,22 @@ resource "aws_instance" "bot" {
         --env-file /etc/telegram-bot.env \
         -v /home/ec2-user/data:/data \
         ghcr.io/youssef080808/telegram_bot:latest
+
+    mkdir -p /home/ec2-user/brawl-data
+    chown ec2-user:ec2-user /home/ec2-user/brawl-data
+    
+    echo "BRAWL_API_KEY=${var.brawl_api_key}" > /etc/brawl-api.env
+    chmod 600 /etc/brawl-api.env
+    
+    docker run -d \
+        --name brawl-api \
+        -p 127.0.0.1:8000:8000 \
+        --restart unless-stopped \
+        --env-file /etc/brawl-api.env \
+        -v /home/ec2-user/brawl-data:/data \
+        ghcr.io/youssef080808/brawl-api:latest
+
+    echo '*/30 * * * * docker run --rm --env-file /etc/brawl-api.env -v /home/ec2-user/brawl-data:/data ghcr.io/youssef080808/brawl-api:latest python3 poller.py >> /home/ec2-user/poller.log 2>&1' | crontab -u ec2-user -
 
   EOF
 
@@ -106,3 +126,4 @@ resource "aws_iam_instance_profile" "bot_profile" {
   name = "telegram-bot-profile"
   role = aws_iam_role.bot_ssm_role.name
 }
+

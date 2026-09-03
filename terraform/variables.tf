@@ -16,3 +16,9 @@ variable "instance_type" {
   type        = string
   default     = "t3.micro"
 }
+
+variable "brawl_api_key" {
+  description = "Brawl Stars API key"
+  type        = string
+  sensitive   = true
+}
