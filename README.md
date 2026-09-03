@@ -212,7 +212,13 @@ The configuration provisions:
 - **A security group** allowing inbound SSH (TCP/22) from a single `/32` address only, with unrestricted egress so the instance can reach the Telegram API, GitHub Container Registry, AWS Systems Manager, and the Planet Python feed. Security groups are stateful, so no inbound rules are needed for responses to the instance's own outbound requests.
 - **A `t3.micro` EC2 instance** running Amazon Linux 2023, attached to that security group and using an existing EC2 key pair for SSH access.
 - **An IAM role and instance profile** granting the SSM Agent the permissions it needs. Because this is a role rather than a user, AWS delivers rotating temporary credentials to the instance automatically — no access key is ever written to the server.
-- **A `user_data` startup script** that runs as root on first boot: it installs and enables Docker, creates the data directory, writes the bot token to a root-only environment file, and starts the container with a restart policy. The instance therefore comes up fully configured with no manual steps.
+- **A `user_data` startup script** that runs as root on first boot: it installs and enables Docker and cron, creates the data directories, writes each service's token to a root-only environment file, starts both containers, and installs the poller's cron entry. The instance therefore comes up fully configured with no manual steps.
+
+### Two services on one instance
+
+This instance also hosts the [Brawl Stars Stats API](https://github.com/Youssef080808/brawl-stars-api), which the bot consumes. The two are separate repositories with separate images and pipelines, but they share a host, so this configuration provisions both — the API's container, its data directory, and the cron entry for its poller.
+
+Each has its own data directory and token file, so neither can read the other's state. The API binds to `127.0.0.1` only, so it is reachable from the bot but not from outside the instance, and no inbound rule was added for it.
 
 ### Resolving the AMI dynamically
 
@@ -321,16 +327,19 @@ docker run -d \
 
 ### Replacing the instance
 
-Changing `ami` or `user_data` forces Terraform to destroy and recreate the instance, taking its disk with it. Subscriber data lives on that disk, so it has to be carried across by hand.
+Changing `ami` or `user_data` forces Terraform to destroy and recreate the instance, taking its disk with it. Both services' databases live on that disk, so both have to be carried across by hand.
 
-**Before applying**, copy the database off and confirm it actually contains rows — a database with a schema and no rows is the same size and passes every superficial check:
+**Before applying**, copy each database off and confirm it actually contains rows — a database with a schema and no rows is the same size and passes every superficial check:
 
 ```bash
 scp -i ~/Desktop/telegram-bot-key.pem ec2-user@OLD_IP:/home/ec2-user/data/subscribers.db ~/Desktop/subscribers-backup.db
+scp -i ~/Desktop/telegram-bot-key.pem ec2-user@OLD_IP:/home/ec2-user/brawl-data/brawl.db ~/Desktop/brawl-backup.db
+
 sqlite3 ~/Desktop/subscribers-backup.db "SELECT * FROM subscribers;"
+sqlite3 ~/Desktop/brawl-backup.db "SELECT COUNT(*) FROM battles;"
 ```
 
-**After applying**, the new instance has already run `user_data`, so the bot is running and has created an empty `subscribers.db` owned by root. Restoring therefore needs the container stopped and a privileged move, rather than a direct overwrite:
+**After applying**, the new instance has already run `user_data`, so both containers are running and have created empty databases owned by root. Restoring therefore needs the container stopped and a privileged move, rather than a direct overwrite:
 
 ```bash
 # From the local machine — copy to the home directory, which ec2-user can write
@@ -340,12 +349,9 @@ scp -i ~/Desktop/telegram-bot-key.pem ~/Desktop/subscribers-backup.db ec2-user@N
 docker stop telegram-bot
 sudo mv /home/ec2-user/subscribers-backup.db /home/ec2-user/data/subscribers.db
 docker start telegram-bot
-
-# Confirm the rows are readable through the application's own data layer
-docker exec telegram-bot python3 -c "import planetpy as p; print(p.get_subscriber('CHAT_ID'))"
 ```
 
-Copying directly into `data/` fails with a permission error because the running container created the file as root, and copying while the container is running risks the open SQLite handle overwriting what was just restored.
+Copying directly into `data/` fails with a permission error because the running container created the file as root, and copying while the container is running risks the open SQLite handle overwriting what was just restored. The same applies to `brawl-data/brawl.db`.
 
 Replacement also changes the instance's IP and ID. Both are available from the outputs:
 
@@ -355,7 +361,7 @@ terraform output
 
 The new instance ID must then be updated in two places before the next deploy will work:
 
-1. The `EC2_INSTANCE_ID` repository secret
+1. The `EC2_INSTANCE_ID` secret in **both** repositories
 2. The instance ARN in the `github-actions-ssm-deploy` IAM policy
 
 ## Project structure
@@ -367,7 +373,7 @@ The new instance ID must then be updated in two places before the next deploy wi
 - `Dockerfile` — defines the container image used for local runs, CI, and production
 - `.github/workflows/build.yml` — GitHub Actions workflow that builds, publishes, and deploys on every push to `main`
 - `terraform/terraform.tf` — Terraform settings and provider version constraints
-- `terraform/variables.tf` — input variables (bot token, instance type, instance name)
+- `terraform/variables.tf` — input variables (bot token, Brawl Stars API key, instance type, instance name)
 - `terraform/main.tf` — the EC2 instance, security group, IAM role, AMI lookup, and startup script
 - `terraform/outputs.tf` — the instance's public IP and ID, printed after apply
 - `subscribers.db` — generated at runtime, stores each subscriber's chat ID, post count, and digest time
