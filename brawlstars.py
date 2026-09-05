@@ -30,7 +30,22 @@ def _normalise(tag):
         new_tag = tag
     return new_tag
 
-async def bs_track(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Finds which player(s) this chat is tracking. Returns None if none.
+async def _tracked_player(update):
+    chat_id = str(update.effective_chat.id)
+    try:
+        players = _get("/players", {"chat_id": chat_id})
+    except requests.RequestException:
+        await update.message.reply_text("The stats service is unavailable.")
+        return None
+
+    if not players:
+        await update.message.reply_text("You're not tracking anyone yet. Use /bs_track <tag> first.")
+        return None
+
+    return players[0]["tag"]  # first tracked player, if there are several
+
+async def track_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("You need to provide your Brawl Stars tag.")
         return

@@ -27,4 +27,4 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("bs_stats", b.stats_command))
     app.add_handler(CommandHandler("bs_brawlers", b.brawlers_command))
     print("Bot is running...")
-    app.run_polling() # starts the bot and keeps it running
+    app.run_polling() # starts the bot and keeps it running #
