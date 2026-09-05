@@ -30,7 +30,7 @@ def _normalise(tag):
         new_tag = tag
     return new_tag
 
-async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def bs_track(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("You need to provide your Brawl Stars tag.")
         return
@@ -56,4 +56,66 @@ async def win_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("You need to provide your Brawl Stars tag")
         return
     tag = _normalise(context.args[0])
-    
+
+# /bs_untrack — stops tracking whichever player this chat registered
+async def untrack_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tag = await _tracked_player(update)
+    if tag is None:
+        return
+
+    try:
+        _delete(f"/players/{tag.lstrip('#')}")
+    except requests.RequestException:
+        await update.message.reply_text("The stats service is unavailable.")
+        return
+
+    await update.message.reply_text("Stopped tracking. Your stored battles are kept.")
+
+
+# /bs_stats [mode] — win/draw/loss record, optionally filtered by mode
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tag = await _tracked_player(update)
+    if tag is None:
+        return
+
+    filters = {}
+    if context.args:
+        filters["mode"] = context.args[0]
+
+    try:
+        record = _get(f"/players/{tag.lstrip('#')}/record", filters)
+    except requests.RequestException:
+        await update.message.reply_text("The stats service is unavailable.")
+        return
+
+    await update.message.reply_text(
+        f"Wins: {record['wins']}  Draws: {record['draws']}  Losses: {record['losses']}  "
+        f"(out of {record['total']} battles)"
+    )
+
+
+# /bs_brawlers [map] — top brawlers by win rate, optionally filtered by map
+async def brawlers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tag = await _tracked_player(update)
+    if tag is None:
+        return
+
+    filters = {}
+    if context.args:
+        filters["map"] = " ".join(context.args)
+
+    try:
+        results = _get(f"/players/{tag.lstrip('#')}/brawlers", filters)
+    except requests.RequestException:
+        await update.message.reply_text("The stats service is unavailable.")
+        return
+
+    if not results:
+        await update.message.reply_text("Not enough battles yet to rank your brawlers.")
+        return
+
+    lines = [
+        f"{r['brawler']}: {r['wins']}-{r['losses']} ({r['total']} matches)"
+        for r in results
+    ]
+    await update.message.reply_text("\n".join(lines))

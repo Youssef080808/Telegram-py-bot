@@ -1,6 +1,7 @@
 from telegram.ext import ApplicationBuilder, CommandHandler
 import planetpy as p
 import os
+import brawlstars as b
 
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN") # replace with your bot token from BotFather
@@ -21,5 +22,9 @@ if __name__ == "__main__":
     app.job_queue.run_repeating(p.send_daily_digest, interval=60, first=0) # schedules the send_daily_digest function to run every 60 seconds
     app.add_handler(CommandHandler("mysettings", p.mysettings_command)) # calls mysettings_command when user sends /mysettings command
     app.add_handler(CommandHandler("settime", p.settime_command)) # calls settime when user sends /settime command
+    app.add_handler(CommandHandler("bs_track", b.track_command))
+    app.add_handler(CommandHandler("bs_untrack", b.untrack_command))
+    app.add_handler(CommandHandler("bs_stats", b.stats_command))
+    app.add_handler(CommandHandler("bs_brawlers", b.brawlers_command))
     print("Bot is running...")
     app.run_polling() # starts the bot and keeps it running
