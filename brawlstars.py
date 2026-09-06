@@ -5,7 +5,7 @@ from telegram.ext import ContextTypes
 
 # Where the Brawl Stars API lives. Inside a container, 'localhost' means the
 # container itself, so the host is reached via Docker's bridge gateway.
-API_BASE = os.environ.get("BRAWL_API_BASE", "https://172.17.0.1:8000")
+API_BASE = os.environ.get("BRAWL_API_BASE", "http://172.17.0.1:8000") # see why https -> http
 
 def _get(path, params=None):
     response = requests.get(f"{API_BASE}{path}", params=params, timeout=10)
@@ -64,13 +64,6 @@ async def track_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("The stats service is unavailable.")
         return
     await update.message.reply_text(f"Now tracking {result['name']}. Stats will build up as you play.")
-    
-
-async def win_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("You need to provide your Brawl Stars tag")
-        return
-    tag = _normalise(context.args[0])
 
 # /bs_untrack — stops tracking whichever player this chat registered
 async def untrack_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

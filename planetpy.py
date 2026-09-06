@@ -165,6 +165,7 @@ async def feed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @log_command
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("These are the user available commands:\n\n"
+    "Planet Python\n\n"
     "/start: starts the bot and shows a welcome message.\n\n"
     "/help: shows this list of available commands and how to use them.\n\n"
     "/feed x: this sends you the x latest blog posts from Planet Python (1-10). If no number is provided, it defaults to 10.\n\n"
@@ -176,6 +177,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     "/settime hour minute: this allows users that are already subscribed to the daily blog posts to change their blog posts set time.\n\n"
     "/unsubscribe: this unsubscribes you from the daily digest of blog posts.\n\n"
     "/mysettings: this shows your current subscription status, your post count, and your chosen digest time.\n\n"
+    "Brawl Stars\n\n"
+    "/bs_track tag: starts tracking your Brawl Stars stats. Provide your player tag, e.g. /bs_track #GPR920P.\n\n"
+    "/bs_untrack: stops tracking your stats. Previously stored battles are kept.\n\n"
+    "/bs_stats mode: shows your win/draw/loss record. Optionally filter by mode, e.g. /bs_stats soloShowdown.\n\n"
+    "/bs_brawlers map: shows your best brawlers by win rate. Optionally filter by map name, e.g. /bs_brawlers Hard Rock Mine.\n\n"
     )
 
 # Sends a random blog post from Planet Python to the user
