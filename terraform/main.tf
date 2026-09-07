@@ -81,7 +81,7 @@ resource "aws_instance" "bot" {
     
     docker run -d \
         --name brawl-api \
-        -p 127.0.0.1:8000:8000 \
+        -p 8000:8000 \
         --restart unless-stopped \
         --env-file /home/ec2-user/brawl-api.env \
         -v /home/ec2-user/brawl-data:/data \
@@ -90,6 +90,7 @@ resource "aws_instance" "bot" {
     echo '*/30 * * * * docker run --rm --env-file /home/ec2-user/brawl-api.env -v /home/ec2-user/brawl-data:/data ghcr.io/youssef080808/brawl-api:latest python3 poller.py >> /home/ec2-user/poller.log 2>&1' | crontab -u ec2-user -
 
   EOF
+  # -p 127.0.0.1:8000:8000
 
   tags = {
     Name = var.instance_name # Instance's name in the console
