@@ -89,7 +89,9 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     filters = {}
     if context.args:
-        filters["mode"] = context.args[0]
+        if _parse_filters(context.args, filters) == -1:
+            await update.message.reply_text("Invalid user input: You forgot an '=' somewhere")
+            return
     
     tag = tag.lstrip("#")
     try:
@@ -97,17 +99,20 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except requests.RequestException:
         await update.message.reply_text("The stats service is unavailable.")
         return
-    rate = (record["wins"]/record["total"]) * 100
+    if record["total"] == 0:
+        rate = 0
+    else:
+        rate = (record["wins"]/record["total"]) * 100
     await update.message.reply_text(
         f"Wins: {record['wins']}  Draws: {record['draws']}  Losses: {record['losses']}  "
-        f"(Total of {record['total']} battles)/n"
+        f"(Total of {record['total']} battles)\n"
         f"Win rate {rate:.2f}%"
     )
 
 # Parse filters from user input, returns -1 for invlaid user input
 def _parse_filters(args, filters):
     for arg in args:
-        if "=" not in args:
+        if "=" not in arg:
             return -1
         key, value = arg.split("=", 1) # splits the two peices of info
         filters[key] = value.lower()
@@ -124,14 +129,15 @@ async def brawlers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         if _parse_filters(context.args, filters) == -1:
             await update.message.reply_text("Invalid user input: You forgot an '=' somewhere")
+            return
     
     tag = tag.lstrip("#")
+    filters["min_matches"] = 1
     try:
         results = _get(f"/players/{tag}/brawlers", filters)
     except requests.RequestException:
         await update.message.reply_text("The stats service is unavailable.")
         return
-    filters["min_matches"] = 1
     if not results:
         await update.message.reply_text("Not enough battles yet to rank your brawlers.")
         return

@@ -180,8 +180,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     "Brawl Stars\n\n"
     "/bs_track tag: starts tracking your Brawl Stars stats. Provide your player tag, e.g. /bs_track #GPR920P.\n\n"
     "/bs_untrack: stops tracking your stats. Previously stored battles are kept.\n\n"
-    "/bs_stats mode: shows your win/draw/loss record. Optionally filter by mode, e.g. /bs_stats soloShowdown.\n\n"
-    "/bs_brawlers map/last/top/mode/type: shows your best brawlers by win rate. Optionally filter by map name, e.g. /bs_brawlers Hard Rock Mine.\n example usage is: /bs_brawlers map=x type=soloRanked last=100 \n the normal modes have type ranked and ranked is soloRanked/teamRanked\n\n"
+    "/bs_brawlers map/last/top/mode/type: shows your best brawlers by win rate. Optionally filter by map name, e.g example usage is: /bs_brawlers map=x type=soloRanked last=100 \n the normal modes have type ranked and ranked is soloRanked/teamRanked\n\n"
+    "/bs_stats mode/last/map/type/brawler: shows your win/draw/loss record. Optionally filter by mode, e.g. same type of usage as bs_brawlers\n\n"
     )
 
 # Sends a random blog post from Planet Python to the user
