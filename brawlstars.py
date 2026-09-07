@@ -6,6 +6,7 @@ from telegram.ext import ContextTypes
 # Where the Brawl Stars API lives. Inside a container, 'localhost' means the
 # container itself, so the host is reached via Docker's bridge gateway.
 API_BASE = os.environ.get("BRAWL_API_BASE", "http://172.17.0.1:8000") # see why https -> http
+# also see why change -p 127.0.0.1:8000:8000 -> 8000:8000
 
 def _get(path, params=None):
     response = requests.get(f"{API_BASE}{path}", params=params, timeout=10)
@@ -31,7 +32,7 @@ def _normalise(tag):
     return new_tag
 
 # Finds which player(s) this chat is tracking. Returns None if none.
-async def _tracked_player(update):
+async def _tracked_player(update: Update):
     chat_id = str(update.effective_chat.id)
     try:
         players = _get("/players", {"chat_id": chat_id})
@@ -70,7 +71,7 @@ async def untrack_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tag = await _tracked_player(update)
     if tag is None:
         return
-
+    
     try:
         _delete(f"/players/{tag.lstrip('#')}")
     except requests.RequestException:
@@ -89,41 +90,54 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     filters = {}
     if context.args:
         filters["mode"] = context.args[0]
-
+    
+    tag = tag.lstrip("#")
     try:
-        record = _get(f"/players/{tag.lstrip('#')}/record", filters)
+        record = _get(f"/players/{tag}/record", filters)
     except requests.RequestException:
         await update.message.reply_text("The stats service is unavailable.")
         return
-
+    rate = record["wins"]/record["total"]
     await update.message.reply_text(
         f"Wins: {record['wins']}  Draws: {record['draws']}  Losses: {record['losses']}  "
-        f"(out of {record['total']} battles)"
+        f"(Total of {record['total']} battles)"
+        f"Win rate {rate}%"
     )
 
+# Parse filters from user input, returns -1 for invlaid user input
+def _parse_filters(args, filters):
+    for arg in args:
+        if "=" not in args:
+            return -1
+        key, value = arg.split("=", 1) # splits the two peices of info
+        filters[key] = value.lower()
+    return 1
 
+        
 # /bs_brawlers [map] — top brawlers by win rate, optionally filtered by map
 async def brawlers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tag = await _tracked_player(update)
     if tag is None:
-        return
+        return 
 
     filters = {}
     if context.args:
-        filters["map"] = " ".join(context.args)
-
+        if _parse_filters(context.args, filters) == -1:
+            await update.message.reply_text("Invalid user input: You forgot an '=' somewhere")
+    
+    tag = tag.lstrip("#")
     try:
-        results = _get(f"/players/{tag.lstrip('#')}/brawlers", filters)
+        results = _get(f"/players/{tag}/brawlers", filters)
     except requests.RequestException:
         await update.message.reply_text("The stats service is unavailable.")
         return
-
+    filters["min_matches"] = 1
     if not results:
         await update.message.reply_text("Not enough battles yet to rank your brawlers.")
         return
 
     lines = [
-        f"{r['brawler']}: {r['wins']}-{r['losses']} ({r['total']} matches)"
+        f"{r['brawler']}: {r['wins']} Wins, {r['losses']} Losses, ({r['total']} matches)"
         for r in results
     ]
     await update.message.reply_text("\n".join(lines))
