@@ -106,7 +106,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"Wins: {record['wins']}  Draws: {record['draws']}  Losses: {record['losses']}  "
         f"(Total of {record['total']} battles)\n"
-        f"Win rate {rate:.2f}%"
+        f"Win rate: {rate:.2f}%"
     )
 
 # Parse filters from user input, returns -1 for invlaid user input
@@ -143,7 +143,7 @@ async def brawlers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     lines = [
-        f"{r['brawler']}: {r['wins']} Wins, {r['losses']} Losses, ({r['total']} matches)"
+        f"{r['brawler']}: {r['wins']} Wins, {r['losses']} Losses, Win rate: {r['wins']/r['total']} ({r['total']} matches)"
         for r in results
     ]
     await update.message.reply_text("\n".join(lines))
