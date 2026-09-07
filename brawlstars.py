@@ -97,11 +97,11 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except requests.RequestException:
         await update.message.reply_text("The stats service is unavailable.")
         return
-    rate = record["wins"]/record["total"]
+    rate = (record["wins"]/record["total"]) * 100
     await update.message.reply_text(
         f"Wins: {record['wins']}  Draws: {record['draws']}  Losses: {record['losses']}  "
-        f"(Total of {record['total']} battles)"
-        f"Win rate {rate}%"
+        f"(Total of {record['total']} battles)/n"
+        f"Win rate {rate:.2f}%"
     )
 
 # Parse filters from user input, returns -1 for invlaid user input
