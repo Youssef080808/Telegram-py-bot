@@ -143,7 +143,7 @@ async def brawlers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     lines = [
-        f"{r['brawler']}: {r['wins']} Wins, {r['losses']} Losses, Win rate: {(r['wins']/r['total']) * 100:.2f} ({r['total']} matches)"
+        f"{r['brawler']}: {r['wins']} Wins, {r['losses']} Losses, Win rate: {(r['wins']/r['total']) * 100:.2f}% ({r['total']} matches)"
         for r in results
     ]
     await update.message.reply_text("\n".join(lines))
