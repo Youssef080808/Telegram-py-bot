@@ -75,18 +75,19 @@ resource "aws_instance" "bot" {
     mkdir -p /home/ec2-user/brawl-data
     chown ec2-user:ec2-user /home/ec2-user/brawl-data
     
-    echo "BRAWL_API_KEY=${var.brawl_api_key}" > /etc/brawl-api.env
-    chmod 600 /etc/brawl-api.env
+    echo "BRAWL_API_KEY=${var.brawl_api_key}" > /home/ec2-user/brawl-api.env
+    chown ec2-user:ec2-user /home/ec2-user/brawl-api.env
+    chmod 600 /home/ec2-user/brawl-api.env
     
     docker run -d \
         --name brawl-api \
         -p 127.0.0.1:8000:8000 \
         --restart unless-stopped \
-        --env-file /etc/brawl-api.env \
+        --env-file /home/ec2-user/brawl-api.env \
         -v /home/ec2-user/brawl-data:/data \
         ghcr.io/youssef080808/brawl-api:latest
 
-    echo '*/30 * * * * docker run --rm --env-file /etc/brawl-api.env -v /home/ec2-user/brawl-data:/data ghcr.io/youssef080808/brawl-api:latest python3 poller.py >> /home/ec2-user/poller.log 2>&1' | crontab -u ec2-user -
+    echo '*/30 * * * * docker run --rm --env-file /home/ec2-user/brawl-api.env -v /home/ec2-user/brawl-data:/data ghcr.io/youssef080808/brawl-api:latest python3 poller.py >> /home/ec2-user/poller.log 2>&1' | crontab -u ec2-user -
 
   EOF
 
