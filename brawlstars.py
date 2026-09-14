@@ -133,6 +133,7 @@ async def brawlers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     tag = tag.lstrip("#")
     filters["min_matches"] = 1
+    filters["top"] = 10
     try:
         results = _get(f"/players/{tag}/brawlers", filters)
     except requests.RequestException:
