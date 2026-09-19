@@ -26,7 +26,7 @@ resource "aws_security_group" "bot_sg" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["142.169.77.104/32"] 
+    cidr_blocks = ["184.145.164.43/32"] 
   }
 
   # Outbound rules - What the instance can reach out to 
