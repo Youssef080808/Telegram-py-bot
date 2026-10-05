@@ -111,11 +111,17 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Parse filters from user input, returns -1 for invlaid user input
 def _parse_filters(args, filters):
+    key = None;
     for arg in args:
-        if "=" not in arg:
-            return -1
-        key, value = arg.split("=", 1) # splits the two peices of info
-        filters[key] = value.lower()
+        if "=" in arg:
+            key, value = arg.split("=", 1) # splits the two peices of info
+            filters[key] = value.lower()
+        elif key is None:
+            return -1;
+        else:
+            filters[key] += " " + arg.lower()
+    for k in filters:
+        filters[k] = filters[k].strip()  # handles "map= hard rock", strip removes whitespace from the start and end of the string
     return 1
 
         
