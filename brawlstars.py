@@ -139,7 +139,6 @@ async def brawlers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     tag = tag.lstrip("#")
     filters["min_matches"] = 1
-    filters["top"] = 10
     try:
         results = _get(f"/players/{tag}/brawlers", filters)
     except requests.RequestException:
@@ -148,6 +147,14 @@ async def brawlers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not results:
         await update.message.reply_text("Not enough battles yet to rank your brawlers.")
         return
+
+    # Rank by win rate, but pull brawlers with few matches toward 50%
+    # by adding 10 imaginary games (5 wins, 5 losses) to everyone.
+    def score(r):
+        return (r["wins"] + 5) / (r["total"] + 10)
+
+    results.sort(key=score, reverse=True)
+    results = results[:10]
 
     lines = [
         f"{r['brawler']}: {r['wins']} Wins, {r['losses']} Losses, Win rate: {(r['wins']/r['total']) * 100:.0f}% ({r['total']} matches)"
